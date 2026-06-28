@@ -1,0 +1,655 @@
+{
+  "keywords": [
+    {
+      "name": "オメガ シーマスター",
+      "max_buy_price": 100000,
+      "min_buy_price": 10000,
+      "exclude_words": [
+        "ベルト",
+        "バックル",
+        "部品",
+        "ジャンク",
+        "説明書",
+        "箱のみ",
+        "文字盤",
+        "冊子"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "時計",
+        "腕時計",
+        "クロノグラフ",
+        "自動巻",
+        "オートマチック",
+        "クォーツ",
+        "Automatic",
+        "Quartz",
+        "Cal.",
+        "ETA",
+        "ムーブメント",
+        "ダイバー"
+      ],
+      "require_model_number": true,
+      "brand_name": "オメガ"
+    },
+    {
+      "name": "タグホイヤー 時計",
+      "max_buy_price": 100000,
+      "min_buy_price": 10000,
+      "exclude_words": [
+        "ベルト",
+        "バックル",
+        "部品",
+        "ジャンク",
+        "説明書",
+        "箱のみ",
+        "文字盤",
+        "冊子",
+        "コマ"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "時計",
+        "腕時計",
+        "クロノグラフ",
+        "自動巻",
+        "オートマチック",
+        "クォーツ",
+        "Automatic",
+        "Quartz",
+        "Cal.",
+        "ETA",
+        "ムーブメント",
+        "ダイバー"
+      ],
+      "require_model_number": true,
+      "brand_name": "タグホイヤー"
+    },
+    {
+      "name": "カルティエ 時計",
+      "max_buy_price": 300000,
+      "min_buy_price": 30000,
+      "exclude_words": [
+        "ベルト",
+        "バックル",
+        "部品",
+        "ジャンク",
+        "説明書",
+        "箱のみ",
+        "文字盤",
+        "冊子",
+        "ジュエリー",
+        "リング",
+        "ブレスレット",
+        "バングル"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "時計",
+        "腕時計",
+        "クロノグラフ",
+        "自動巻",
+        "オートマチック",
+        "クォーツ",
+        "Automatic",
+        "Quartz",
+        "Cal.",
+        "ETA",
+        "ムーブメント",
+        "ダイバー"
+      ],
+      "require_model_number": true,
+      "brand_name": "カルティエ"
+    },
+    {
+      "name": "IWC 時計",
+      "max_buy_price": 300000,
+      "min_buy_price": 30000,
+      "exclude_words": [
+        "ベルト",
+        "バックル",
+        "部品",
+        "ジャンク",
+        "説明書",
+        "箱のみ",
+        "文字盤",
+        "冊子",
+        "バッグ",
+        "スポーツバッグ",
+        "ポーチ",
+        "ノベルティ"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "時計",
+        "腕時計",
+        "クロノグラフ",
+        "自動巻",
+        "オートマチック",
+        "クォーツ",
+        "Automatic",
+        "Quartz",
+        "Cal.",
+        "ETA",
+        "ムーブメント",
+        "ダイバー"
+      ],
+      "require_model_number": true,
+      "brand_name": "IWC"
+    },
+    {
+      "name": "ブライトリング 時計",
+      "max_buy_price": 300000,
+      "min_buy_price": 30000,
+      "exclude_words": [
+        "ベルト",
+        "バックル",
+        "部品",
+        "ジャンク",
+        "説明書",
+        "箱のみ",
+        "文字盤",
+        "冊子"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "時計",
+        "腕時計",
+        "クロノグラフ",
+        "自動巻",
+        "オートマチック",
+        "クォーツ",
+        "Automatic",
+        "Quartz",
+        "Cal.",
+        "ETA",
+        "ムーブメント",
+        "ダイバー"
+      ],
+      "require_model_number": true,
+      "brand_name": "ブライトリング"
+    },
+    {
+      "name": "パネライ 時計",
+      "max_buy_price": 400000,
+      "min_buy_price": 50000,
+      "exclude_words": [
+        "ベルト",
+        "バックル",
+        "部品",
+        "ジャンク",
+        "説明書",
+        "箱のみ",
+        "文字盤",
+        "冊子"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "時計",
+        "腕時計",
+        "クロノグラフ",
+        "自動巻",
+        "オートマチック",
+        "クォーツ",
+        "Automatic",
+        "Quartz",
+        "Cal.",
+        "ETA",
+        "ムーブメント",
+        "ダイバー"
+      ],
+      "require_model_number": true,
+      "brand_name": "パネライ"
+    },
+    {
+      "name": "モンクレール ダウン",
+      "max_buy_price": 150000,
+      "min_buy_price": 20000,
+      "exclude_words": [
+        "保存袋",
+        "ショッパー",
+        "紙袋",
+        "空箱",
+        "ワッペン",
+        "バッジ",
+        "パッチ",
+        "キーホルダー",
+        "ノベルティ",
+        "レプリカ",
+        "コピー",
+        "キッズ",
+        "ベビー",
+        "子供",
+        "ジュニア",
+        "こども"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "ダウン",
+        "ダウンジャケット",
+        "DOWN"
+      ],
+      "require_model_number": true,
+      "brand_name": "モンクレール"
+    },
+    {
+      "name": "カナダグース ダウン",
+      "max_buy_price": 100000,
+      "min_buy_price": 15000,
+      "exclude_words": [
+        "保存袋",
+        "空箱",
+        "カタログ",
+        "ワッペン",
+        "バッジ",
+        "パッチ",
+        "ノベルティ",
+        "レプリカ",
+        "コピー",
+        "キッズ",
+        "ベビー",
+        "子供",
+        "ジュニア",
+        "こども"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "ダウン",
+        "ダウンジャケット",
+        "DOWN"
+      ],
+      "require_model_number": true,
+      "brand_name": "カナダグース"
+    },
+    {
+      "name": "ピレネックス ダウン",
+      "max_buy_price": 60000,
+      "min_buy_price": 10000,
+      "exclude_words": [
+        "保存袋",
+        "空箱",
+        "カタログ",
+        "ワッペン",
+        "バッジ",
+        "ノベルティ",
+        "レプリカ",
+        "コピー",
+        "キッズ",
+        "ベビー",
+        "子供",
+        "ジュニア",
+        "こども"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "ダウン",
+        "ダウンジャケット",
+        "DOWN"
+      ],
+      "require_model_number": true,
+      "brand_name": "ピレネックス"
+    },
+    {
+      "name": "レイバン サングラス",
+      "max_buy_price": 15000,
+      "min_buy_price": 2000,
+      "exclude_words": [
+        "保存袋",
+        "空箱",
+        "カタログ",
+        "ケースのみ",
+        "レンズのみ",
+        "度入り",
+        "ジャンク",
+        "レプリカ",
+        "コピー"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "サングラス",
+        "SUNGLASS"
+      ],
+      "require_model_number": true,
+      "brand_name": "レイバン"
+    },
+    {
+      "name": "グッチ サングラス",
+      "max_buy_price": 25000,
+      "min_buy_price": 3000,
+      "exclude_words": [
+        "保存袋",
+        "空箱",
+        "カタログ",
+        "ケースのみ",
+        "レンズのみ",
+        "度入り",
+        "ジャンク",
+        "レプリカ",
+        "コピー"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "サングラス",
+        "SUNGLASS"
+      ],
+      "require_model_number": true,
+      "brand_name": "グッチ"
+    },
+    {
+      "name": "セリーヌ サングラス",
+      "max_buy_price": 25000,
+      "min_buy_price": 3000,
+      "exclude_words": [
+        "保存袋",
+        "空箱",
+        "カタログ",
+        "ケースのみ",
+        "レンズのみ",
+        "度入り",
+        "ジャンク",
+        "レプリカ",
+        "コピー"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "サングラス",
+        "SUNGLASS"
+      ],
+      "require_model_number": true,
+      "brand_name": "セリーヌ"
+    },
+    {
+      "name": "プラダ サングラス",
+      "max_buy_price": 20000,
+      "min_buy_price": 3000,
+      "exclude_words": [
+        "保存袋",
+        "空箱",
+        "カタログ",
+        "ケースのみ",
+        "レンズのみ",
+        "度入り",
+        "ジャンク",
+        "レプリカ",
+        "コピー"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "サングラス",
+        "SUNGLASS"
+      ],
+      "require_model_number": true,
+      "brand_name": "プラダ"
+    },
+    {
+      "name": "ルイヴィトン サングラス",
+      "max_buy_price": 30000,
+      "min_buy_price": 5000,
+      "exclude_words": [
+        "保存袋",
+        "空箱",
+        "カタログ",
+        "ケースのみ",
+        "レンズのみ",
+        "度入り",
+        "ジャンク",
+        "レプリカ",
+        "コピー"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "サングラス",
+        "SUNGLASS"
+      ],
+      "require_model_number": true,
+      "brand_name": "ルイヴィトン"
+    },
+    {
+      "name": "シャネル サングラス",
+      "max_buy_price": 30000,
+      "min_buy_price": 5000,
+      "exclude_words": [
+        "保存袋",
+        "空箱",
+        "カタログ",
+        "ケースのみ",
+        "レンズのみ",
+        "度入り",
+        "ジャンク",
+        "レプリカ",
+        "コピー"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "サングラス",
+        "SUNGLASS"
+      ],
+      "require_model_number": true,
+      "brand_name": "シャネル"
+    },
+    {
+      "name": "オークリー サングラス",
+      "max_buy_price": 15000,
+      "min_buy_price": 2000,
+      "exclude_words": [
+        "保存袋",
+        "空箱",
+        "カタログ",
+        "ケースのみ",
+        "レンズのみ",
+        "度入り",
+        "ジャンク",
+        "レプリカ",
+        "コピー"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "サングラス",
+        "SUNGLASS"
+      ],
+      "require_model_number": true,
+      "brand_name": "オークリー"
+    },
+    {
+      "name": "トムフォード サングラス",
+      "max_buy_price": 30000,
+      "min_buy_price": 5000,
+      "exclude_words": [
+        "保存袋",
+        "空箱",
+        "カタログ",
+        "ケースのみ",
+        "レンズのみ",
+        "度入り",
+        "ジャンク",
+        "レプリカ",
+        "コピー"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "サングラス",
+        "SUNGLASS"
+      ],
+      "require_model_number": true,
+      "brand_name": "トムフォード"
+    },
+    {
+      "name": "バーバリー サングラス",
+      "max_buy_price": 20000,
+      "min_buy_price": 3000,
+      "exclude_words": [
+        "保存袋",
+        "空箱",
+        "カタログ",
+        "ケースのみ",
+        "レンズのみ",
+        "度入り",
+        "ジャンク",
+        "レプリカ",
+        "コピー"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "サングラス",
+        "SUNGLASS"
+      ],
+      "require_model_number": true,
+      "brand_name": "バーバリー"
+    },
+    {
+      "name": "クリスチャンディオール サングラス",
+      "max_buy_price": 25000,
+      "min_buy_price": 3000,
+      "exclude_words": [
+        "保存袋",
+        "空箱",
+        "カタログ",
+        "ケースのみ",
+        "レンズのみ",
+        "度入り",
+        "ジャンク",
+        "レプリカ",
+        "コピー"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "サングラス",
+        "SUNGLASS"
+      ],
+      "require_model_number": true,
+      "brand_name": "クリスチャンディオール"
+    },
+    {
+      "name": "カルティエ ジュエリー",
+      "max_buy_price": 300000,
+      "min_buy_price": 30000,
+      "exclude_words": [
+        "保存袋",
+        "空箱",
+        "カタログ",
+        "ノベルティ",
+        "レプリカ",
+        "コピー",
+        "メッキ加工",
+        "時計"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "リング",
+        "指輪",
+        "ブレスレット",
+        "バングル",
+        "ネックレス",
+        "ペンダント",
+        "ピアス",
+        "イヤリング",
+        "RING",
+        "BRACELET",
+        "NECKLACE"
+      ],
+      "require_model_number": true,
+      "brand_name": "カルティエ"
+    },
+    {
+      "name": "ティファニー ジュエリー",
+      "max_buy_price": 150000,
+      "min_buy_price": 10000,
+      "exclude_words": [
+        "保存袋",
+        "空箱",
+        "カタログ",
+        "ノベルティ",
+        "レプリカ",
+        "コピー",
+        "メッキ加工"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "リング",
+        "指輪",
+        "ブレスレット",
+        "バングル",
+        "ネックレス",
+        "ペンダント",
+        "ピアス",
+        "イヤリング",
+        "RING",
+        "BRACELET",
+        "NECKLACE"
+      ],
+      "require_model_number": true,
+      "brand_name": "ティファニー"
+    },
+    {
+      "name": "ヴァンクリーフ&アーペル ジュエリー",
+      "max_buy_price": 400000,
+      "min_buy_price": 50000,
+      "exclude_words": [
+        "保存袋",
+        "空箱",
+        "カタログ",
+        "ノベルティ",
+        "レプリカ",
+        "コピー",
+        "メッキ加工"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "リング",
+        "指輪",
+        "ブレスレット",
+        "バングル",
+        "ネックレス",
+        "ペンダント",
+        "ピアス",
+        "イヤリング",
+        "RING",
+        "BRACELET",
+        "NECKLACE"
+      ],
+      "require_model_number": true,
+      "brand_name": "ヴァンクリーフ&アーペル"
+    },
+    {
+      "name": "ブルガリ ジュエリー",
+      "max_buy_price": 200000,
+      "min_buy_price": 20000,
+      "exclude_words": [
+        "保存袋",
+        "空箱",
+        "カタログ",
+        "ノベルティ",
+        "レプリカ",
+        "コピー",
+        "メッキ加工",
+        "香水"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "リング",
+        "指輪",
+        "ブレスレット",
+        "バングル",
+        "ネックレス",
+        "ペンダント",
+        "ピアス",
+        "イヤリング",
+        "RING",
+        "BRACELET",
+        "NECKLACE"
+      ],
+      "require_model_number": true,
+      "brand_name": "ブルガリ"
+    }
+  ],
+  "settings": {
+    "min_profit_yen": 3000,
+    "mercari_commission_rate": 0.1,
+    "assumed_shipping_cost": 700,
+    "mercari_sold_sample_count": 30,
+    "price_cache_hours": 12,
+    "search_items_per_source": 40,
+    "notify_hour": 8,
+    "notify_minute": 0
+  }
+}
