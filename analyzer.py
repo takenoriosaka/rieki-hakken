@@ -85,7 +85,8 @@ def get_market_price(
     )
 
     database.cache_price(
-        cache_key, avg, med, market.min_price, market.max_price, len(prices)
+        cache_key, avg, med, market.min_price, market.max_price, len(prices),
+        base_keyword=keyword,
     )
     band = f"¥{int(low):,}〜¥{int(high):,}"
     print(f"  [Mercari] {keyword}{range_str}: 中央値 ¥{med:,} / 平均 ¥{avg:,}"
@@ -148,7 +149,7 @@ def find_deals(
     min_buy_price: int = 0,
 ) -> list[Deal]:
     """仕入れ候補リストからお得案件を絞り込む（最低仕入れ価格未満は除外）。
-    重複チェックは distributor が生徒ごとに行うためここでは不要。
+    同一URLの重複はこの関数内で除去する。
     """
     deals = []
     seen_urls: set[str] = set()

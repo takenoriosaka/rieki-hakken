@@ -1,33 +1,30 @@
 """
-メルカリ転売アービトラージツール（メール配信版）
+メルカリ転売アービトラージツール（ダッシュボード版）
+
+ヤフオク・メルカリ・セカストをスキャンして案件を検出し、DBに保存した上で
+ダッシュボード(docs/index.html)を再生成、GitHub Pagesへ自動publishする。
 
 実行方法:
-  python main.py           # 全生徒にメール送信
-  python main.py --dry-run # メール送信せず結果だけ表示
+  python main.py           # 本番実行（スキャン→DB保存→ダッシュボード再生成→git push）
+  python main.py --dry-run # DB保存・ダッシュボード更新をせず結果だけ表示
   python scheduler.py      # 毎日定時に自動実行
+  python generate_dashboard.py --open  # ダッシュボードHTMLだけ再生成してブラウザで開く
 """
 
 import argparse
 import json
-import os
 import sys
 import time
-
-from dotenv import load_dotenv
+from datetime import datetime
 
 import analyzer
 import database
-import distributor
-import notifier
 import model_extractor
 from models import Deal
 from scrapers import yahoo_auctions, sekaist
 from scrapers import mercari as mercari_scraper
 
-load_dotenv()
-
-CONFIG_PATH   = "config.json"
-STUDENTS_PATH = "students.json"
+CONFIG_PATH = "config.json"
 
 
 def run(dry_run: bool = False):
@@ -39,17 +36,7 @@ def run(dry_run: bool = False):
     settings = config["settings"]
     keywords = config["keywords"]
 
-    gmail_address      = os.getenv("GMAIL_ADDRESS", "")
-    gmail_app_password = os.getenv("GMAIL_APP_PASSWORD", "")
-    deals_per_student  = int(os.getenv("DEALS_PER_STUDENT", "10"))
-    max_per_deal       = int(os.getenv("MAX_STUDENTS_PER_DEAL", "3"))
-
     database.init_db()
-
-    # 生徒リストを読み込む
-    students = distributor.load_students(STUDENTS_PATH)
-    if not students and not dry_run:
-        print("[警告] students.json に生徒が登録されていません")
 
     # ──────────────────────────────────────────
     # スキャン
@@ -65,6 +52,7 @@ def run(dry_run: bool = False):
         immediate_only       = kw_conf.get("yahoo_immediate_only", False)
         require_model_number = kw_conf.get("require_model_number", False)
         brand_name           = kw_conf.get("brand_name", keyword.split()[0])
+        category             = kw_conf.get("category", "")
 
         excl_str = f" 除外:{exclude_words}" if exclude_words else ""
         req_str  = f" 必須:{required_words}" if required_words else ""
@@ -213,6 +201,9 @@ def run(dry_run: bool = False):
                     min_profit=settings["min_profit_yen"],
                 )
                 if deal:
+                    deal.brand = brand_name
+                    deal.model = model
+                    deal.category = category
                     model_deals.append(deal)
 
             model_deals.sort(key=lambda d: d.estimated_profit, reverse=True)
@@ -260,6 +251,8 @@ def run(dry_run: bool = False):
                 min_profit=settings["min_profit_yen"],
             )
             if deal:
+                deal.brand = brand_name
+                deal.category = category
                 deals.append(deal)
 
         deals.sort(key=lambda d: d.estimated_profit, reverse=True)
@@ -277,59 +270,42 @@ def run(dry_run: bool = False):
     print(f"{'=' * 50}")
 
     # ──────────────────────────────────────────
-    # 配分
-    # ──────────────────────────────────────────
-    assignments = distributor.distribute(
-        all_deals=all_deals,
-        students=students,
-        deals_per_student=deals_per_student,
-        max_per_deal=max_per_deal,
-    )
-
-    print(f"\n【配分結果】")
-    name_map = {s["email"]: s["name"] for s in students}
-    for email, deals in assignments.items():
-        name = name_map.get(email, email)
-        profits = [d.estimated_profit for d in deals]
-        print(f"  {name}: {len(deals)} 件 "
-              f"(利益 ¥{min(profits):,} 〜 ¥{max(profits):,})" if profits else f"  {name}: 0 件")
-
-    # ──────────────────────────────────────────
-    # 送信
+    # ダッシュボード出力
     # ──────────────────────────────────────────
     if dry_run:
-        print("\n[DRY RUN] メール送信をスキップします")
-        _print_summary(assignments, name_map)
+        print("\n[DRY RUN] DB保存・ダッシュボード更新をスキップします")
+        _print_summary(all_deals)
         return
 
-    if not gmail_address or not gmail_app_password:
-        print("\n[エラー] .env に GMAIL_ADDRESS と GMAIL_APP_PASSWORD を設定してください")
-        sys.exit(1)
+    if all_deals:
+        scanned_at = datetime.now().isoformat()
+        database.save_scan_deals(all_deals, scanned_at)
+        print(f"\nDB保存完了: {len(all_deals)} 件 → scan_deals テーブル")
 
-    print(f"\n【メール送信】")
-    results = notifier.send_all(
-        assignments=assignments,
-        students=students,
-        gmail_address=gmail_address,
-        gmail_app_password=gmail_app_password,
+    # ダッシュボードHTMLを再生成
+    import subprocess
+    result = subprocess.run(
+        [sys.executable, "generate_dashboard.py"],
+        capture_output=True, text=True,
     )
+    if result.returncode == 0:
+        print(f"ダッシュボード生成完了: docs/index.html")
+    else:
+        print(f"[警告] ダッシュボード生成エラー: {result.stderr}")
 
-    # 送信済みをDBに記録
-    for email, deals in assignments.items():
-        if results.get(email):
-            for deal in deals:
-                database.record_student_deal(
-                    email=email,
-                    url=deal.item.url,
-                    title=deal.item.title,
-                    source=deal.item.source,
-                    keyword=deal.keyword,
-                    profit=deal.estimated_profit,
-                )
-
-    ok  = sum(1 for v in results.values() if v)
-    err = len(results) - ok
-    print(f"\n送信完了: 成功 {ok} 件 / 失敗 {err} 件")
+    # GitHub Pages に自動プッシュ
+    try:
+        subprocess.run(["git", "add", "docs/index.html", "docs/style.css", "docs/app.js"], check=True)
+        subprocess.run(
+            ["git", "commit", "-m",
+             f"Update dashboard: {len(all_deals)} deals ({datetime.now().strftime('%Y-%m-%d %H:%M')})"],
+            check=True,
+        )
+        subprocess.run(["git", "push"], check=True)
+        print("GitHub Pages 更新完了")
+    except subprocess.CalledProcessError as e:
+        print(f"[警告] git push 失敗: {e}")
+        print("手動で: git add docs/index.html && git commit -m 'Update' && git push")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -344,20 +320,17 @@ def _load_config() -> dict:
         sys.exit(f"config.json の形式が不正です: {e}")
 
 
-def _print_summary(assignments: dict[str, list[Deal]], name_map: dict):
+def _print_summary(deals: list[Deal]):
     print()
-    for email, deals in assignments.items():
-        name = name_map.get(email, email)
-        print(f"──── {name} ({email}) ────")
-        for i, d in enumerate(deals, 1):
-            print(f"  {i:2}. ¥{d.item.price:,} → 利益 ¥{d.estimated_profit:,}"
-                  f" ({d.format_source()}) {d.item.title[:35]}")
-        print()
+    for i, d in enumerate(deals, 1):
+        print(f"  {i:2}. ¥{d.item.price:,} → 利益 ¥{d.estimated_profit:,}"
+              f" ({d.format_source()}) {d.item.title[:45]}")
+    print()
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="メルカリ転売アービトラージツール")
     parser.add_argument("--dry-run", action="store_true",
-                        help="メール送信せず結果を表示のみ")
+                        help="DB保存・ダッシュボード更新せず結果を表示のみ")
     args = parser.parse_args()
     run(dry_run=args.dry_run)

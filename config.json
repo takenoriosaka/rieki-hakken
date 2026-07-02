@@ -30,7 +30,8 @@
         "ダイバー"
       ],
       "require_model_number": true,
-      "brand_name": "オメガ"
+      "brand_name": "オメガ",
+      "category": "時計"
     },
     {
       "name": "タグホイヤー 時計",
@@ -63,7 +64,8 @@
         "ダイバー"
       ],
       "require_model_number": true,
-      "brand_name": "タグホイヤー"
+      "brand_name": "タグホイヤー",
+      "category": "時計"
     },
     {
       "name": "カルティエ 時計",
@@ -99,7 +101,8 @@
         "ダイバー"
       ],
       "require_model_number": true,
-      "brand_name": "カルティエ"
+      "brand_name": "カルティエ",
+      "category": "時計"
     },
     {
       "name": "IWC 時計",
@@ -135,7 +138,8 @@
         "ダイバー"
       ],
       "require_model_number": true,
-      "brand_name": "IWC"
+      "brand_name": "IWC",
+      "category": "時計"
     },
     {
       "name": "ブライトリング 時計",
@@ -167,7 +171,8 @@
         "ダイバー"
       ],
       "require_model_number": true,
-      "brand_name": "ブライトリング"
+      "brand_name": "ブライトリング",
+      "category": "時計"
     },
     {
       "name": "パネライ 時計",
@@ -199,7 +204,8 @@
         "ダイバー"
       ],
       "require_model_number": true,
-      "brand_name": "パネライ"
+      "brand_name": "パネライ",
+      "category": "時計"
     },
     {
       "name": "モンクレール ダウン",
@@ -230,7 +236,8 @@
         "DOWN"
       ],
       "require_model_number": true,
-      "brand_name": "モンクレール"
+      "brand_name": "モンクレール",
+      "category": "ダウン"
     },
     {
       "name": "カナダグース ダウン",
@@ -259,7 +266,8 @@
         "DOWN"
       ],
       "require_model_number": true,
-      "brand_name": "カナダグース"
+      "brand_name": "カナダグース",
+      "category": "ダウン"
     },
     {
       "name": "ピレネックス ダウン",
@@ -287,7 +295,8 @@
         "DOWN"
       ],
       "require_model_number": true,
-      "brand_name": "ピレネックス"
+      "brand_name": "ピレネックス",
+      "category": "ダウン"
     },
     {
       "name": "レイバン サングラス",
@@ -310,7 +319,8 @@
         "SUNGLASS"
       ],
       "require_model_number": true,
-      "brand_name": "レイバン"
+      "brand_name": "レイバン",
+      "category": "サングラス"
     },
     {
       "name": "グッチ サングラス",
@@ -333,7 +343,8 @@
         "SUNGLASS"
       ],
       "require_model_number": true,
-      "brand_name": "グッチ"
+      "brand_name": "グッチ",
+      "category": "サングラス"
     },
     {
       "name": "セリーヌ サングラス",
@@ -356,7 +367,8 @@
         "SUNGLASS"
       ],
       "require_model_number": true,
-      "brand_name": "セリーヌ"
+      "brand_name": "セリーヌ",
+      "category": "サングラス"
     },
     {
       "name": "プラダ サングラス",
@@ -379,7 +391,8 @@
         "SUNGLASS"
       ],
       "require_model_number": true,
-      "brand_name": "プラダ"
+      "brand_name": "プラダ",
+      "category": "サングラス"
     },
     {
       "name": "ルイヴィトン サングラス",
@@ -402,7 +415,8 @@
         "SUNGLASS"
       ],
       "require_model_number": true,
-      "brand_name": "ルイヴィトン"
+      "brand_name": "ルイヴィトン",
+      "category": "サングラス"
     },
     {
       "name": "シャネル サングラス",
@@ -425,7 +439,8 @@
         "SUNGLASS"
       ],
       "require_model_number": true,
-      "brand_name": "シャネル"
+      "brand_name": "シャネル",
+      "category": "サングラス"
     },
     {
       "name": "オークリー サングラス",
@@ -448,7 +463,8 @@
         "SUNGLASS"
       ],
       "require_model_number": true,
-      "brand_name": "オークリー"
+      "brand_name": "オークリー",
+      "category": "サングラス"
     },
     {
       "name": "トムフォード サングラス",
@@ -471,7 +487,8 @@
         "SUNGLASS"
       ],
       "require_model_number": true,
-      "brand_name": "トムフォード"
+      "brand_name": "トムフォード",
+      "category": "サングラス"
     },
     {
       "name": "バーバリー サングラス",
@@ -494,7 +511,8 @@
         "SUNGLASS"
       ],
       "require_model_number": true,
-      "brand_name": "バーバリー"
+      "brand_name": "バーバリー",
+      "category": "サングラス"
     },
     {
       "name": "クリスチャンディオール サングラス",
@@ -517,7 +535,8 @@
         "SUNGLASS"
       ],
       "require_model_number": true,
-      "brand_name": "クリスチャンディオール"
+      "brand_name": "クリスチャンディオール",
+      "category": "サングラス"
     },
     {
       "name": "カルティエ ジュエリー",
@@ -548,7 +567,8 @@
         "NECKLACE"
       ],
       "require_model_number": true,
-      "brand_name": "カルティエ"
+      "brand_name": "カルティエ",
+      "category": "ジュエリー"
     },
     {
       "name": "ティファニー ジュエリー",
@@ -578,7 +598,8 @@
         "NECKLACE"
       ],
       "require_model_number": true,
-      "brand_name": "ティファニー"
+      "brand_name": "ティファニー",
+      "category": "ジュエリー"
     },
     {
       "name": "ヴァンクリーフ&アーペル ジュエリー",
@@ -608,7 +629,8 @@
         "NECKLACE"
       ],
       "require_model_number": true,
-      "brand_name": "ヴァンクリーフ&アーペル"
+      "brand_name": "ヴァンクリーフ&アーペル",
+      "category": "ジュエリー"
     },
     {
       "name": "ブルガリ ジュエリー",
@@ -639,7 +661,8 @@
         "NECKLACE"
       ],
       "require_model_number": true,
-      "brand_name": "ブルガリ"
+      "brand_name": "ブルガリ",
+      "category": "ジュエリー"
     }
   ],
   "settings": {

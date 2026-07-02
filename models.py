@@ -31,6 +31,9 @@ class Deal:
     roi_percent: float
     condition_label: str = "状態不明"   # 判定された状態ラベル
     condition_factor: float = 0.90      # 適用した補正係数
+    brand: str = ""
+    model: str = ""
+    category: str = ""
 
     def format_source(self) -> str:
         labels = {

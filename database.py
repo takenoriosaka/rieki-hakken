@@ -16,7 +16,8 @@ def init_db():
                 min_price    INTEGER NOT NULL,
                 max_price    INTEGER NOT NULL,
                 sample_count INTEGER NOT NULL,
-                updated_at   TEXT NOT NULL
+                updated_at   TEXT NOT NULL,
+                base_keyword TEXT NOT NULL DEFAULT ''
             );
 
             -- 生徒ごとの配信済み案件（競合防止・重複防止）
@@ -37,7 +38,48 @@ def init_db():
                 assignment_count INTEGER NOT NULL DEFAULT 0,
                 first_assigned   TEXT NOT NULL
             );
+
+            -- スキャン結果（ダッシュボード用）
+            CREATE TABLE IF NOT EXISTS scan_deals (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                scanned_at      TEXT NOT NULL,
+                keyword         TEXT NOT NULL,
+                brand           TEXT NOT NULL DEFAULT '',
+                model           TEXT NOT NULL DEFAULT '',
+                title           TEXT NOT NULL,
+                url             TEXT NOT NULL,
+                source          TEXT NOT NULL,
+                purchase_price  INTEGER NOT NULL,
+                reference_price INTEGER NOT NULL,
+                estimated_profit INTEGER NOT NULL,
+                roi_percent     REAL NOT NULL,
+                condition_label TEXT NOT NULL,
+                image_url       TEXT NOT NULL DEFAULT '',
+                category        TEXT NOT NULL DEFAULT ''
+            );
         """)
+
+        # 既存DBへのマイグレーション（新規DBではCREATE TABLEで既に列があるため no-op）
+        _ensure_column(conn, "scan_deals", "category", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(conn, "price_cache", "base_keyword", "TEXT NOT NULL DEFAULT ''")
+
+        # price_cache.base_keyword のバックフィル（'|' 区切りのキャッシュキーから
+        # 価格帯・必須ワードサフィックスを除いた「基本キーワード」を復元する）
+        conn.execute("""
+            UPDATE price_cache
+            SET base_keyword = CASE
+                WHEN keyword LIKE '%|%' THEN substr(keyword, 1, instr(keyword, '|') - 1)
+                ELSE keyword
+            END
+            WHERE base_keyword = ''
+        """)
+
+
+def _ensure_column(conn, table, column, coltype_and_default):
+    """指定テーブルに列が無ければ ALTER TABLE で追加する（冪等）。"""
+    cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})")}
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {coltype_and_default}")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -64,14 +106,86 @@ def get_cached_price(keyword: str, max_age_hours: int = 12) -> Optional[dict]:
 
 
 def cache_price(keyword: str, avg_price: int, median_price: int,
-                min_price: int, max_price: int, sample_count: int):
+                min_price: int, max_price: int, sample_count: int,
+                base_keyword: str = ""):
     with _conn() as conn:
         conn.execute("""
             INSERT OR REPLACE INTO price_cache
-                (keyword, avg_price, median_price, min_price, max_price, sample_count, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (keyword, avg_price, median_price, min_price, max_price, sample_count, updated_at, base_keyword)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (keyword, avg_price, median_price, min_price, max_price,
-              sample_count, datetime.now().isoformat()))
+              sample_count, datetime.now().isoformat(), base_keyword))
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# スキャン結果（ダッシュボード用）
+# ──────────────────────────────────────────────────────────────────────────────
+
+def save_scan_deals(deals: list, scanned_at: str) -> None:
+    """スキャン結果を scan_deals テーブルに保存する（ダッシュボード表示用）。"""
+    with _conn() as conn:
+        conn.executemany("""
+            INSERT INTO scan_deals
+                (scanned_at, keyword, brand, model, title, url, source,
+                 purchase_price, reference_price, estimated_profit,
+                 roi_percent, condition_label, image_url, category)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, [
+            (
+                scanned_at,
+                d.keyword,
+                d.brand,
+                d.model,
+                d.item.title,
+                d.item.url,
+                d.item.source,
+                d.item.price,
+                d.mercari_avg_price,
+                d.estimated_profit,
+                d.roi_percent,
+                d.condition_label,
+                d.item.image_url or "",
+                d.category,
+            )
+            for d in deals
+        ])
+
+
+def load_scan_deals(days: int = 7) -> list[dict]:
+    """直近 days 日のスキャン結果を返す（新しい順）。"""
+    cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+    with _conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT scanned_at, keyword, brand, model, title, url, source,
+                   purchase_price, reference_price, estimated_profit,
+                   roi_percent, condition_label, image_url, category
+            FROM scan_deals
+            WHERE scanned_at >= ?
+            ORDER BY scanned_at DESC, estimated_profit DESC
+            """,
+            (cutoff,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def load_market_reference() -> list[dict]:
+    """price_cache から base_keyword 単位で集約した相場一覧を返す（サイドバー表示用）。"""
+    with _conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT base_keyword AS keyword,
+                   CAST(ROUND(AVG(median_price)) AS INTEGER) AS median_price,
+                   MIN(min_price) AS min_price,
+                   MAX(max_price) AS max_price,
+                   SUM(sample_count) AS sample_count
+            FROM price_cache
+            WHERE base_keyword != ''
+            GROUP BY base_keyword
+            ORDER BY base_keyword
+            """
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 # ──────────────────────────────────────────────────────────────────────────────
