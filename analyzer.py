@@ -51,7 +51,7 @@ def get_market_price(
         required_words=required_words, price_min=price_min, price_max=price_max,
     )
 
-    if len(prices) < 3:
+    if len(prices) < 1:
         print(f"  [警告] {keyword}{range_str}: サンプル不足 ({len(prices)}件)")
         return None
 

@@ -173,9 +173,14 @@ def _playwright_sold_prices(
 
     # タイトルに除外ワードが含まれるものを除去（Mercariは -word 構文非対応のため後処理）
     # required_words: 同名称が別カテゴリーにも存在する場合の混入防止（例: トリニティ=指輪/サングラス）
+    # brand_token: keyword の先頭単語（ブランド名）。Mercariのあいまい検索は他ブランドの
+    # 商品を紛れ込ませることがあるため（例: 「ブルガリ ジュエリー」検索にルイヴィトン商品が混入）、
+    # タイトルにブランド名が含まれない候補は相場サンプルから除外する
     prices = []
     ex_lower  = [w.lower() for w in exclude_words] if exclude_words else []
     req_lower = [w.lower() for w in required_words] if required_words else []
+    kw_tokens = keyword.split()
+    brand_token = kw_tokens[0].lower() if kw_tokens else ""
     for r in raw:
         price = r.get("price", 0)
         if price <= 0:
@@ -184,6 +189,8 @@ def _playwright_sold_prices(
         if ex_lower and any(w in title for w in ex_lower):
             continue
         if req_lower and not any(w in title for w in req_lower):
+            continue
+        if brand_token and brand_token not in title:
             continue
         prices.append(price)
 

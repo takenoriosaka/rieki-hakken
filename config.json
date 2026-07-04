@@ -3,7 +3,7 @@
     {
       "name": "オメガ シーマスター",
       "max_buy_price": 100000,
-      "min_buy_price": 10000,
+      "min_buy_price": 100,
       "exclude_words": [
         "ベルト",
         "バックル",
@@ -36,7 +36,7 @@
     {
       "name": "タグホイヤー 時計",
       "max_buy_price": 100000,
-      "min_buy_price": 10000,
+      "min_buy_price": 100,
       "exclude_words": [
         "ベルト",
         "バックル",
@@ -70,7 +70,7 @@
     {
       "name": "カルティエ 時計",
       "max_buy_price": 300000,
-      "min_buy_price": 30000,
+      "min_buy_price": 100,
       "exclude_words": [
         "ベルト",
         "バックル",
@@ -107,7 +107,7 @@
     {
       "name": "IWC 時計",
       "max_buy_price": 300000,
-      "min_buy_price": 30000,
+      "min_buy_price": 100,
       "exclude_words": [
         "ベルト",
         "バックル",
@@ -144,7 +144,7 @@
     {
       "name": "ブライトリング 時計",
       "max_buy_price": 300000,
-      "min_buy_price": 30000,
+      "min_buy_price": 100,
       "exclude_words": [
         "ベルト",
         "バックル",
@@ -177,7 +177,7 @@
     {
       "name": "パネライ 時計",
       "max_buy_price": 400000,
-      "min_buy_price": 50000,
+      "min_buy_price": 100,
       "exclude_words": [
         "ベルト",
         "バックル",
@@ -209,8 +209,8 @@
     },
     {
       "name": "モンクレール ダウン",
-      "max_buy_price": 150000,
-      "min_buy_price": 20000,
+      "max_buy_price": 100000,
+      "min_buy_price": 100,
       "exclude_words": [
         "保存袋",
         "ショッパー",
@@ -242,7 +242,7 @@
     {
       "name": "カナダグース ダウン",
       "max_buy_price": 100000,
-      "min_buy_price": 15000,
+      "min_buy_price": 100,
       "exclude_words": [
         "保存袋",
         "空箱",
@@ -272,7 +272,7 @@
     {
       "name": "ピレネックス ダウン",
       "max_buy_price": 60000,
-      "min_buy_price": 10000,
+      "min_buy_price": 100,
       "exclude_words": [
         "保存袋",
         "空箱",
@@ -299,9 +299,38 @@
       "category": "ダウン"
     },
     {
+      "name": "タトラス ダウン",
+      "max_buy_price": 50000,
+      "min_buy_price": 100,
+      "exclude_words": [
+        "保存袋",
+        "空箱",
+        "カタログ",
+        "ワッペン",
+        "バッジ",
+        "ノベルティ",
+        "レプリカ",
+        "コピー",
+        "キッズ",
+        "ベビー",
+        "子供",
+        "ジュニア",
+        "こども"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "ダウン",
+        "ダウンジャケット",
+        "DOWN"
+      ],
+      "require_model_number": true,
+      "brand_name": "タトラス",
+      "category": "ダウン"
+    },
+    {
       "name": "レイバン サングラス",
       "max_buy_price": 15000,
-      "min_buy_price": 2000,
+      "min_buy_price": 100,
       "exclude_words": [
         "保存袋",
         "空箱",
@@ -325,7 +354,7 @@
     {
       "name": "グッチ サングラス",
       "max_buy_price": 25000,
-      "min_buy_price": 3000,
+      "min_buy_price": 100,
       "exclude_words": [
         "保存袋",
         "空箱",
@@ -349,7 +378,7 @@
     {
       "name": "セリーヌ サングラス",
       "max_buy_price": 25000,
-      "min_buy_price": 3000,
+      "min_buy_price": 100,
       "exclude_words": [
         "保存袋",
         "空箱",
@@ -373,7 +402,7 @@
     {
       "name": "プラダ サングラス",
       "max_buy_price": 20000,
-      "min_buy_price": 3000,
+      "min_buy_price": 100,
       "exclude_words": [
         "保存袋",
         "空箱",
@@ -397,7 +426,7 @@
     {
       "name": "ルイヴィトン サングラス",
       "max_buy_price": 30000,
-      "min_buy_price": 5000,
+      "min_buy_price": 100,
       "exclude_words": [
         "保存袋",
         "空箱",
@@ -421,7 +450,7 @@
     {
       "name": "シャネル サングラス",
       "max_buy_price": 30000,
-      "min_buy_price": 5000,
+      "min_buy_price": 100,
       "exclude_words": [
         "保存袋",
         "空箱",
@@ -445,7 +474,7 @@
     {
       "name": "オークリー サングラス",
       "max_buy_price": 15000,
-      "min_buy_price": 2000,
+      "min_buy_price": 100,
       "exclude_words": [
         "保存袋",
         "空箱",
@@ -469,7 +498,7 @@
     {
       "name": "トムフォード サングラス",
       "max_buy_price": 30000,
-      "min_buy_price": 5000,
+      "min_buy_price": 100,
       "exclude_words": [
         "保存袋",
         "空箱",
@@ -493,7 +522,7 @@
     {
       "name": "バーバリー サングラス",
       "max_buy_price": 20000,
-      "min_buy_price": 3000,
+      "min_buy_price": 100,
       "exclude_words": [
         "保存袋",
         "空箱",
@@ -517,7 +546,7 @@
     {
       "name": "クリスチャンディオール サングラス",
       "max_buy_price": 25000,
-      "min_buy_price": 3000,
+      "min_buy_price": 100,
       "exclude_words": [
         "保存袋",
         "空箱",
@@ -539,9 +568,105 @@
       "category": "サングラス"
     },
     {
+      "name": "ヴェルサーチ サングラス",
+      "max_buy_price": 10000,
+      "min_buy_price": 100,
+      "exclude_words": [
+        "保存袋",
+        "空箱",
+        "カタログ",
+        "ケースのみ",
+        "レンズのみ",
+        "度入り",
+        "ジャンク",
+        "レプリカ",
+        "コピー"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "サングラス",
+        "SUNGLASS"
+      ],
+      "require_model_number": true,
+      "brand_name": "ヴェルサーチ",
+      "category": "サングラス"
+    },
+    {
+      "name": "リックオウエンス サングラス",
+      "max_buy_price": 10000,
+      "min_buy_price": 100,
+      "exclude_words": [
+        "保存袋",
+        "空箱",
+        "カタログ",
+        "ケースのみ",
+        "レンズのみ",
+        "度入り",
+        "ジャンク",
+        "レプリカ",
+        "コピー"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "サングラス",
+        "SUNGLASS"
+      ],
+      "require_model_number": true,
+      "brand_name": "リックオウエンス",
+      "category": "サングラス"
+    },
+    {
+      "name": "ジャンポールゴルチエ サングラス",
+      "max_buy_price": 10000,
+      "min_buy_price": 100,
+      "exclude_words": [
+        "保存袋",
+        "空箱",
+        "カタログ",
+        "ケースのみ",
+        "レンズのみ",
+        "度入り",
+        "ジャンク",
+        "レプリカ",
+        "コピー"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "サングラス",
+        "SUNGLASS"
+      ],
+      "require_model_number": true,
+      "brand_name": "ジャンポールゴルチエ",
+      "category": "サングラス"
+    },
+    {
+      "name": "ロエベ サングラス",
+      "max_buy_price": 10000,
+      "min_buy_price": 100,
+      "exclude_words": [
+        "保存袋",
+        "空箱",
+        "カタログ",
+        "ケースのみ",
+        "レンズのみ",
+        "度入り",
+        "ジャンク",
+        "レプリカ",
+        "コピー"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "サングラス",
+        "SUNGLASS"
+      ],
+      "require_model_number": true,
+      "brand_name": "ロエベ",
+      "category": "サングラス"
+    },
+    {
       "name": "カルティエ ジュエリー",
       "max_buy_price": 300000,
-      "min_buy_price": 30000,
+      "min_buy_price": 100,
       "exclude_words": [
         "保存袋",
         "空箱",
@@ -573,7 +698,7 @@
     {
       "name": "ティファニー ジュエリー",
       "max_buy_price": 150000,
-      "min_buy_price": 10000,
+      "min_buy_price": 100,
       "exclude_words": [
         "保存袋",
         "空箱",
@@ -604,7 +729,7 @@
     {
       "name": "ヴァンクリーフ&アーペル ジュエリー",
       "max_buy_price": 400000,
-      "min_buy_price": 50000,
+      "min_buy_price": 100,
       "exclude_words": [
         "保存袋",
         "空箱",
@@ -635,7 +760,7 @@
     {
       "name": "ブルガリ ジュエリー",
       "max_buy_price": 200000,
-      "min_buy_price": 20000,
+      "min_buy_price": 100,
       "exclude_words": [
         "保存袋",
         "空箱",
@@ -663,6 +788,63 @@
       "require_model_number": true,
       "brand_name": "ブルガリ",
       "category": "ジュエリー"
+    },
+    {
+      "name": "エルメス スカーフ",
+      "max_buy_price": 12000,
+      "min_buy_price": 100,
+      "exclude_words": [
+        "ジャンク",
+        "レプリカ",
+        "コピー"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "Brides de Gala",
+        "ブリッド・ドゥ・ガラ",
+        "Rocabar",
+        "ロカバール",
+        "Cavalcadour",
+        "カヴァルカドゥール",
+        "Grand Manège",
+        "Grand Manege",
+        "グランマネージュ",
+        "Faubourg",
+        "フォーブル",
+        "Crazy Faubourg",
+        "クレイジー・フォーブル",
+        "Faubourg City",
+        "フォーブル・シティ",
+        "Les Clés",
+        "レ・クレ",
+        "Chaîne d'Ancre",
+        "Chaine d'Ancre",
+        "シェーヌ・ダンクル",
+        "Zebra Pegasus",
+        "ゼブラ・ペガサス",
+        "Jungle Love",
+        "ジャングルラブ",
+        "Ex Libris",
+        "エクスリブリス",
+        "Ex-Libris à Carreaux",
+        "エクスリブリス・チェック",
+        "Ex Libris en Kimonos",
+        "Cosmos",
+        "コスモス",
+        "Persona",
+        "ペルソナ",
+        "Mont Saint-Michel",
+        "Mont Saint Michel",
+        "モンサンミッシェル",
+        "Napoleon",
+        "Napoléon",
+        "ナポレオン",
+        "Les Cavaliers d'Or",
+        "レ・カヴァリエ・ドール"
+      ],
+      "require_model_number": false,
+      "brand_name": "エルメス",
+      "category": "スカーフ"
     }
   ],
   "settings": {
