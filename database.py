@@ -160,8 +160,13 @@ def load_scan_deals(days: int = 7) -> list[dict]:
             SELECT scanned_at, keyword, brand, model, title, url, source,
                    purchase_price, reference_price, estimated_profit,
                    roi_percent, condition_label, image_url, category
-            FROM scan_deals
-            WHERE scanned_at >= ?
+            FROM (
+                SELECT *,
+                       ROW_NUMBER() OVER (PARTITION BY url ORDER BY scanned_at DESC) AS rn
+                FROM scan_deals
+                WHERE scanned_at >= ?
+            )
+            WHERE rn = 1
             ORDER BY scanned_at DESC, estimated_profit DESC
             """,
             (cutoff,),
