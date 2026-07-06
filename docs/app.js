@@ -1,8 +1,8 @@
 // ダッシュボードのフィルタ・並べ替え・描画ロジック。
 // DEALS / MARKETS / SETTINGS / GENERATED_AT は index.html 内のインライン <script> で定義済み。
 
-const SOURCE_LABELS = { yahoo_auctions: 'ヤフオク', mercari_cheap: 'メルカリ安値', sekaist: 'セカスト' };
-const SOURCE_BADGE_CLASS = { yahoo_auctions: 'badge-yahoo', mercari_cheap: 'badge-mercari', sekaist: 'badge-sekaist' };
+const SOURCE_LABELS = { yahoo_auctions: 'ヤフオク', mercari_cheap: 'メルカリ安値', sekaist: 'セカスト', vector_park: 'ベクトルパーク', trefac: 'トレファク', rakuma: 'ラクマ', yahoo_flea: 'Yahoo!フリマ' };
+const SOURCE_BADGE_CLASS = { yahoo_auctions: 'badge-yahoo', mercari_cheap: 'badge-mercari', sekaist: 'badge-sekaist', vector_park: 'badge-vectorpark', trefac: 'badge-trefac', rakuma: 'badge-rakuma', yahoo_flea: 'badge-yahoofuri' };
 
 let currentCategory = '';
 let currentBrand = '';
