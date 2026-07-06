@@ -40,5 +40,9 @@ class Deal:
             "yahoo_auctions": "ヤフオク",
             "mercari_cheap":  "メルカリ(出品中)",
             "sekaist":        "セカスト",
+            "vector_park":    "ベクトルパーク",
+            "trefac":         "トレファク",
+            "rakuma":         "ラクマ",
+            "yahoo_flea":     "Yahoo!フリマ",
         }
         return labels.get(self.item.source, self.item.source)

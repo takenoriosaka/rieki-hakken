@@ -1,8 +1,10 @@
 """
 メルカリ転売アービトラージツール（ダッシュボード版）
 
-ヤフオク・メルカリ・セカストをスキャンして案件を検出し、DBに保存した上で
-ダッシュボード(docs/index.html)を再生成、GitHub Pagesへ自動publishする。
+ヤフオク・メルカリ・ベクトルパーク・トレファク・ラクマ・Yahoo!フリマをスキャンして
+案件を検出し、DBに保存した上でダッシュボード(docs/index.html)を再生成、
+GitHub Pagesへ自動publishする。
+（セカスト/2nd StreetはCloudflare WAFに常時ブロックされAPI代替もないため無効化済み。scrapers/sekaist.pyは温存）
 
 実行方法:
   python main.py           # 本番実行（スキャン→DB保存→ダッシュボード再生成→git push）
@@ -21,8 +23,9 @@ import analyzer
 import database
 import model_extractor
 from models import Deal
-from scrapers import yahoo_auctions, sekaist
+from scrapers import yahoo_auctions
 from scrapers import mercari as mercari_scraper
+from scrapers import vector_park, trefac_fashion, rakuma, yahoo_flea_market
 
 CONFIG_PATH = "config.json"
 
@@ -103,14 +106,47 @@ def run(dry_run: bool = False):
         sources_items.extend(cheap_items)
         time.sleep(1)
 
-        print(f"  [セカスト] 検索中...")
-        sekaist_items = sekaist.get_cheap_listings(
-            keyword, max_price=max_buy,
-            count=settings["search_items_per_source"]
+        print(f"  [ベクトルパーク] 検索中...")
+        vector_park_items = vector_park.get_cheap_listings(
+            keyword, max_price=max_buy, min_price=min_buy,
+            count=settings["search_items_per_source"],
+            exclude_words=exclude_words,
         )
-        print(f"  [セカスト] {len(sekaist_items)} 件")
-        sources_items.extend(sekaist_items)
+        print(f"  [ベクトルパーク] {len(vector_park_items)} 件")
+        sources_items.extend(vector_park_items)
         time.sleep(1)
+
+        print(f"  [トレファク] 検索中...")
+        trefac_items = trefac_fashion.get_cheap_listings(
+            keyword, max_price=max_buy, min_price=min_buy,
+            count=settings["search_items_per_source"],
+            exclude_words=exclude_words,
+        )
+        print(f"  [トレファク] {len(trefac_items)} 件")
+        sources_items.extend(trefac_items)
+        time.sleep(1)
+
+        print(f"  [ラクマ] 検索中...")
+        rakuma_items = rakuma.get_cheap_listings(
+            keyword, max_price=max_buy, min_price=min_buy,
+            count=settings["search_items_per_source"],
+            exclude_words=exclude_words,
+        )
+        print(f"  [ラクマ] {len(rakuma_items)} 件")
+        sources_items.extend(rakuma_items)
+        time.sleep(1)
+
+        print(f"  [Yahoo!フリマ] 検索中...")
+        yahoo_flea_items = yahoo_flea_market.get_cheap_listings(
+            keyword, max_price=max_buy, min_price=min_buy,
+            count=settings["search_items_per_source"],
+            exclude_words=exclude_words,
+        )
+        print(f"  [Yahoo!フリマ] {len(yahoo_flea_items)} 件")
+        sources_items.extend(yahoo_flea_items)
+        time.sleep(1)
+
+        # sekaist (2nd Street) disabled: Cloudflare WAF blocks all requests, no API alternative
 
         # ── タイトルフィルター ───────────────────────────────────
         # 1) required_words（明示設定）: いずれかのワードがタイトルに必要

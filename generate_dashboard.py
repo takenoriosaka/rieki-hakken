@@ -30,6 +30,10 @@ SOURCE_LABELS = {
     "yahoo_auctions": "ヤフオク",
     "mercari_cheap":  "メルカリ安値",
     "sekaist":        "セカスト",
+    "vector_park":    "ベクトルパーク",
+    "trefac":         "トレファク",
+    "rakuma":         "ラクマ",
+    "yahoo_flea":     "Yahoo!フリマ",
 }
 
 
