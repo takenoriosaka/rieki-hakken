@@ -845,6 +845,102 @@
       "require_model_number": false,
       "brand_name": "エルメス",
       "category": "スカーフ"
+    },
+    {
+      "name": "ミュウミュウ サングラス",
+      "max_buy_price": 20000,
+      "min_buy_price": 100,
+      "exclude_words": [
+        "保存袋",
+        "空箱",
+        "カタログ",
+        "ケースのみ",
+        "レンズのみ",
+        "度入り",
+        "ジャンク",
+        "レプリカ",
+        "コピー"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "サングラス",
+        "SUNGLASS"
+      ],
+      "require_model_number": true,
+      "brand_name": "ミュウミュウ",
+      "category": "サングラス"
+    },
+    {
+      "name": "バレンシアガ サングラス",
+      "max_buy_price": 20000,
+      "min_buy_price": 100,
+      "exclude_words": [
+        "保存袋",
+        "空箱",
+        "カタログ",
+        "ケースのみ",
+        "レンズのみ",
+        "度入り",
+        "ジャンク",
+        "レプリカ",
+        "コピー"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "サングラス",
+        "SUNGLASS"
+      ],
+      "require_model_number": true,
+      "brand_name": "バレンシアガ",
+      "category": "サングラス"
+    },
+    {
+      "name": "EYEVAN サングラス",
+      "max_buy_price": 20000,
+      "min_buy_price": 100,
+      "exclude_words": [
+        "保存袋",
+        "空箱",
+        "カタログ",
+        "ケースのみ",
+        "レンズのみ",
+        "度入り",
+        "ジャンク",
+        "レプリカ",
+        "コピー"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "サングラス",
+        "SUNGLASS"
+      ],
+      "require_model_number": true,
+      "brand_name": "EYEVAN",
+      "category": "サングラス"
+    },
+    {
+      "name": "ayame サングラス",
+      "max_buy_price": 20000,
+      "min_buy_price": 100,
+      "exclude_words": [
+        "保存袋",
+        "空箱",
+        "カタログ",
+        "ケースのみ",
+        "レンズのみ",
+        "度入り",
+        "ジャンク",
+        "レプリカ",
+        "コピー"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "サングラス",
+        "SUNGLASS"
+      ],
+      "require_model_number": true,
+      "brand_name": "ayame",
+      "category": "サングラス"
     }
   ],
   "settings": {
@@ -853,7 +949,7 @@
     "assumed_shipping_cost": 700,
     "mercari_sold_sample_count": 30,
     "price_cache_hours": 12,
-    "search_items_per_source": 40,
+    "search_items_per_source": 80,
     "notify_hour": 8,
     "notify_minute": 0
   }
