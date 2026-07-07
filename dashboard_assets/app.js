@@ -162,7 +162,7 @@ function render() {
     const categoryBadge = d.category ? `<span class="badge badge-category">${d.category}</span>` : '';
     const searchText = [d.brand, d.model].filter(Boolean).join(' ');
     const searchTextAttr = JSON.stringify(searchText).replace(/"/g, '&quot;');
-    const mercariSearchUrl = `https://jp.mercari.com/search?keyword=${encodeURIComponent(searchText)}`;
+    const mercariSearchUrl = `https://jp.mercari.com/search?keyword=${encodeURIComponent(searchText)}&status=sold_out&sort=created_time&order=desc&item_types=1`;
     return `
     <div class="card">
       ${img}
@@ -179,7 +179,7 @@ function render() {
         <div class="card-profit ${profitClass}">¥${Number(d.estimated_profit).toLocaleString()} 利益 <span style="font-size:13px;font-weight:400;color:#888">利益率 ${d.roi_percent}%</span></div>
         <div class="card-actions-secondary">
           <button type="button" class="btn-secondary btn-copy" onclick="copyDealText(this, ${searchTextAttr})">📋 コピー</button>
-          <a class="btn-secondary btn-mercari" href="${mercariSearchUrl}" target="_blank" rel="noopener noreferrer">メルカリで見る</a>
+          <a class="btn-secondary btn-mercari" href="${mercariSearchUrl}" target="_blank" rel="noopener noreferrer">メルカリ相場を見る</a>
         </div>
         <a class="card-btn" href="${d.url}" target="_blank" rel="noopener">商品を見る →</a>
       </div>
