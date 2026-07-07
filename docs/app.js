@@ -71,6 +71,21 @@ function filterBrand(brand, btnEl) {
   render();
 }
 
+// ── 「{brand} {model}」をクリップボードにコピー ─────────────────
+function copyDealText(btnEl, text) {
+  if (!(navigator.clipboard && navigator.clipboard.writeText)) {
+    console.error('クリップボードAPIが利用できません');
+    return;
+  }
+  const original = btnEl.textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    btnEl.textContent = 'コピーしました';
+    setTimeout(() => { btnEl.textContent = original; }, 1500);
+  }).catch(err => {
+    console.error('コピーに失敗しました', err);
+  });
+}
+
 function setSort(s, btnEl) {
   currentSort = s;
   document.querySelectorAll('.sort-btn').forEach(b => b.classList.remove('active'));
@@ -143,6 +158,9 @@ function render() {
       : `<div class="card-img-placeholder">🏷️</div>`;
     const modelBadge = d.model ? `<span class="badge badge-cond">${d.model}</span>` : '';
     const categoryBadge = d.category ? `<span class="badge badge-category">${d.category}</span>` : '';
+    const searchText = [d.brand, d.model].filter(Boolean).join(' ');
+    const searchTextAttr = JSON.stringify(searchText).replace(/"/g, '&quot;');
+    const mercariSearchUrl = `https://jp.mercari.com/search?keyword=${encodeURIComponent(searchText)}`;
     return `
     <div class="card">
       ${img}
@@ -157,6 +175,10 @@ function render() {
         <div class="card-title">${d.title}</div>
         <div class="card-prices">仕入れ <span>¥${Number(d.purchase_price).toLocaleString()}</span> → 相場 <span>¥${Number(d.reference_price).toLocaleString()}</span></div>
         <div class="card-profit ${profitClass}">¥${Number(d.estimated_profit).toLocaleString()} 利益 <span style="font-size:13px;font-weight:400;color:#888">利益率 ${d.roi_percent}%</span></div>
+        <div class="card-actions-secondary">
+          <button type="button" class="btn-secondary btn-copy" onclick="copyDealText(this, ${searchTextAttr})">📋 コピー</button>
+          <a class="btn-secondary btn-mercari" href="${mercariSearchUrl}" target="_blank" rel="noopener noreferrer">メルカリで見る</a>
+        </div>
         <a class="card-btn" href="${d.url}" target="_blank" rel="noopener">商品を見る →</a>
       </div>
     </div>`;

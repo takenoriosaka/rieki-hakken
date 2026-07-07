@@ -65,6 +65,13 @@ header p { font-size: 12px; opacity: .85; }
 .card-btn { display: block; background: #e74c3c; color: #fff; text-align: center; padding: 9px; border-radius: 8px; font-size: 13px; font-weight: 600; }
 .card-btn:hover { background: #c0392b; }
 
+/* card secondary action row (copy / mercari search) */
+.card-actions-secondary { display: flex; gap: 6px; margin-bottom: 6px; }
+.btn-secondary { flex: 1; display: block; text-align: center; padding: 6px 4px; border-radius: 8px; font-size: 12px; font-weight: 600; background: #f7f7f7; color: #555; border: 1px solid #ddd; cursor: pointer; transition: .15s; font-family: inherit; }
+.btn-secondary:hover { background: #ececec; }
+.btn-mercari { background: #fce4ec; color: #c62828; border-color: #f8bbd0; }
+.btn-mercari:hover { background: #fbd5e0; }
+
 /* empty */
 .empty { text-align: center; color: #bbb; padding: 60px 0; font-size: 14px; }
 
