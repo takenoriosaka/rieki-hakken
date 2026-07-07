@@ -109,12 +109,14 @@ function buildMarkets() {
     el.innerHTML = '<div style="color:#bbb;font-size:12px">データなし</div>';
     return;
   }
-  el.innerHTML = filtered.map(m =>
-    `<div class="mkt-row">
+  el.innerHTML = filtered.map(m => {
+    const kwAttr = JSON.stringify(m.keyword).replace(/"/g, '&quot;');
+    return `<div class="mkt-row">
        <span class="mkt-kw" title="${m.keyword}">${m.keyword}</span>
+       <button type="button" class="market-copy-btn" onclick="copyDealText(this, ${kwAttr})">📋</button>
        <span class="mkt-price">¥${Number(m.median_price).toLocaleString()}</span>
-     </div>`
-  ).join('');
+     </div>`;
+  }).join('');
 }
 
 function render() {

@@ -83,6 +83,8 @@ header p { font-size: 12px; opacity: .85; }
 .mkt-row:last-child { border-bottom: none; }
 .mkt-kw { color: #555; flex: 1; margin-right: 8px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .mkt-price { font-weight: 700; color: #c0392b; white-space: nowrap; }
+.market-copy-btn { flex: none; padding: 1px 5px; margin-right: 6px; font-size: 10px; line-height: 1.4; border-radius: 4px; background: #f7f7f7; color: #555; border: 1px solid #ddd; cursor: pointer; white-space: nowrap; transition: .15s; font-family: inherit; }
+.market-copy-btn:hover { background: #ececec; }
 
 /* calc */
 .calc-row { margin-bottom: 8px; }
