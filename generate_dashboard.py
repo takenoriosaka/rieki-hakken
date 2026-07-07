@@ -15,11 +15,13 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from datetime import datetime
 
 # project root に database.py があるので sys.path を通す
 sys.path.insert(0, os.path.dirname(__file__))
 import database
+from scrapers import yahoo_auctions
 
 OUT_DIR       = "docs"
 OUT_FILE      = os.path.join(OUT_DIR, "index.html")
@@ -45,6 +47,7 @@ def main():
 
     database.init_db()
     deals     = database.load_scan_deals(days=args.days)
+    deals     = _filter_ended_yahoo_auctions(deals)
     markets   = database.load_market_reference()
     generated = datetime.now().strftime("%Y/%m/%d %H:%M")
 
@@ -67,6 +70,27 @@ def main():
     print(f"生成完了: {OUT_FILE} ({len(deals)} 件)")
     if args.open:
         subprocess.run(["open", OUT_FILE])
+
+
+def _filter_ended_yahoo_auctions(deals: list[dict]) -> list[dict]:
+    """終了済みのヤフオク商品をダッシュボードから除外する（購入不可のため表示しても無意味）。"""
+    filtered = []
+    excluded_count = 0
+    for deal in deals:
+        if deal.get("source") == "yahoo_auctions":
+            try:
+                ended = yahoo_auctions.is_ended(deal["url"])
+            except Exception as e:
+                print(f"[Dashboard] ヤフオク終了判定エラー ({deal.get('url')}): {e}")
+                ended = False
+            time.sleep(0.5)
+            if ended:
+                excluded_count += 1
+                continue
+        filtered.append(deal)
+
+    print(f"終了済みヤフオク商品を除外: {excluded_count}件")
+    return filtered
 
 
 def build_html(deals: list[dict], markets: list[dict], settings: dict, generated_at: str) -> str:
@@ -107,7 +131,7 @@ def build_html(deals: list[dict], markets: list[dict], settings: dict, generated
   </div>
   <div class="sort-tabs">
     <button class="sort-btn active" onclick="setSort('profit', this)">利益順</button>
-    <button class="sort-btn" onclick="setSort('roi', this)">ROI順</button>
+    <button class="sort-btn" onclick="setSort('roi', this)">利益率順</button>
     <button class="sort-btn" onclick="setSort('price', this)">安い順</button>
     <button class="sort-btn" onclick="setSort('price_desc', this)">高い順</button>
     <button class="sort-btn" onclick="setSort('new', this)">新着順</button>

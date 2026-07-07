@@ -156,7 +156,7 @@ function render() {
         </div>
         <div class="card-title">${d.title}</div>
         <div class="card-prices">仕入れ <span>¥${Number(d.purchase_price).toLocaleString()}</span> → 相場 <span>¥${Number(d.reference_price).toLocaleString()}</span></div>
-        <div class="card-profit ${profitClass}">¥${Number(d.estimated_profit).toLocaleString()} 利益 <span style="font-size:13px;font-weight:400;color:#888">ROI ${d.roi_percent}%</span></div>
+        <div class="card-profit ${profitClass}">¥${Number(d.estimated_profit).toLocaleString()} 利益 <span style="font-size:13px;font-weight:400;color:#888">利益率 ${d.roi_percent}%</span></div>
         <a class="card-btn" href="${d.url}" target="_blank" rel="noopener">商品を見る →</a>
       </div>
     </div>`;
