@@ -1,0 +1,97 @@
+name: Scan and Publish Dashboard
+
+# 3日に1回、自動でスキャン→ダッシュボード再生成→GitHub Pagesへpushする。
+# main.py が「スキャン→DB保存→docs/ 再生成→git add/commit/push」まで
+# すべて自前で行う設計なので、このワークフローは main.py を実行するだけでよい
+# （Actions側で別途 git commit/push は行わない。二重pushを避けるため）。
+#
+# cron は「日」フィールドに */3 を指定しても月をまたぐと間隔が
+# 1〜2日ずれる（例: 1,4,...31 の次が翌月1日で間隔が1日になる）ため、
+# ここでは毎日トリガーしておき、ジョブの最初のステップで
+# 「エポックからの経過日数 % 3 == 0」かどうかを判定し、
+# 条件を満たさない日は後続ステップをすべてスキップすることで
+# 正確に3日に1回だけ本処理が走るようにしている。
+# workflow_dispatch（手動実行）の場合はこの判定を無視して常に実行する。
+
+on:
+  schedule:
+    # 毎日 19:00 UTC (=JST 04:00) にトリガー。実際に処理が走るのは
+    # 下記 check_day ステップの判定で3日に1回のみ。
+    - cron: "0 19 * * *"
+  workflow_dispatch: {}
+
+# 手動実行とスケジュール実行が重なって git push が衝突しないようにする
+concurrency:
+  group: rieki-hakken-scan
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Check if today is a scheduled scan day (every 3 days)
+        id: check_day
+        run: |
+          days_since_epoch=$(( $(date -u +%s) / 86400 ))
+          remainder=$(( days_since_epoch % 3 ))
+          echo "days_since_epoch=${days_since_epoch} remainder=${remainder} event=${{ github.event_name }}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$remainder" -eq 0 ]; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false (skip: not a scheduled scan day)"
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout
+        if: steps.check_day.outputs.run == 'true'
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        if: steps.check_day.outputs.run == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Python dependencies
+        if: steps.check_day.outputs.run == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Playwright browser (Chromium)
+        if: steps.check_day.outputs.run == 'true'
+        run: playwright install --with-deps chromium
+
+      # arbitrage.db は .gitignore 対象でリポジトリにはコミットされないため、
+      # 何もしなければ Actions の実行ごとに DB が空の状態からスタートしてしまい、
+      # ダッシュボードの「直近7日間の履歴表示」(database.load_scan_deals(days=7)) や
+      # 相場キャッシュ(price_cache_hours)が機能しなくなる。
+      # actions/cache で arbitrage.db を実行間で引き継ぐことでこれを回避する。
+      - name: Restore arbitrage.db cache
+        if: steps.check_day.outputs.run == 'true'
+        uses: actions/cache@v4
+        with:
+          path: arbitrage.db
+          key: arbitrage-db-${{ github.run_id }}
+          restore-keys: |
+            arbitrage-db-
+
+      - name: Configure git identity for auto-commit
+        if: steps.check_day.outputs.run == 'true'
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      # main.py が中でスキャン→DB保存→generate_dashboard.py実行→
+      # git add docs/*→git commit→git push まで自動で行う。
+      # 変更がない場合は内部の `git commit` がエラーになるだけで
+      # (main.py 側で except CalledProcessError により握りつぶされ、
+      # 空コミットにはならず、ジョブ自体も失敗しない)、
+      # そのため Actions 側で追加の git diff / commit / push は行わない。
+      - name: Run scan (scan -> DB save -> dashboard regenerate -> git push)
+        if: steps.check_day.outputs.run == 'true'
+        run: python main.py
