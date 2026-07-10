@@ -44,6 +44,76 @@ def run(dry_run: bool = False):
     # ──────────────────────────────────────────
     # スキャン
     # ──────────────────────────────────────────
+    # Playwright ブラウザはスキャン全体で1つだけ起動し使い回す（毎回起動すると
+    # 型番/価格帯ごとのメルカリ相場ルックアップが数百回発生し、1件19秒前後×件数で
+    # GitHub Actions のタイムアウトを超えていたため）。例外時も確実にクローズする。
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("[エラー] Playwright が未インストールです。setup.sh を実行してください。")
+        sys.exit(1)
+
+    playwright = sync_playwright().start()
+    try:
+        browser = playwright.chromium.launch(headless=True)
+        try:
+            page = mercari_scraper.new_page(browser)
+            all_deals: list[Deal] = _scan_keywords(keywords, settings, page)
+        finally:
+            browser.close()
+    finally:
+        playwright.stop()
+
+    all_deals.sort(key=lambda d: d.estimated_profit, reverse=True)
+
+    print(f"\n{'=' * 50}")
+    print(f"スキャン完了: 合計 {len(all_deals)} 件")
+    print(f"{'=' * 50}")
+
+    # ──────────────────────────────────────────
+    # ダッシュボード出力
+    # ──────────────────────────────────────────
+    if dry_run:
+        print("\n[DRY RUN] DB保存・ダッシュボード更新をスキップします")
+        _print_summary(all_deals)
+        return
+
+    if all_deals:
+        scanned_at = datetime.now().isoformat()
+        database.save_scan_deals(all_deals, scanned_at)
+        print(f"\nDB保存完了: {len(all_deals)} 件 → scan_deals テーブル")
+
+    # ダッシュボードHTMLを再生成
+    import subprocess
+    result = subprocess.run(
+        [sys.executable, "generate_dashboard.py"],
+        capture_output=True, text=True,
+    )
+    if result.returncode == 0:
+        print(f"ダッシュボード生成完了: docs/index.html")
+    else:
+        print(f"[警告] ダッシュボード生成エラー: {result.stderr}")
+
+    # GitHub Pages に自動プッシュ
+    try:
+        subprocess.run(["git", "add", "docs/index.html", "docs/style.css", "docs/app.js"], check=True)
+        subprocess.run(
+            ["git", "commit", "-m",
+             f"Update dashboard: {len(all_deals)} deals ({datetime.now().strftime('%Y-%m-%d %H:%M')})"],
+            check=True,
+        )
+        subprocess.run(["git", "push"], check=True)
+        print("GitHub Pages 更新完了")
+    except subprocess.CalledProcessError as e:
+        print(f"[警告] git push 失敗: {e}")
+        print("手動で: git add docs/index.html && git commit -m 'Update' && git push")
+
+
+def _scan_keywords(keywords: list[dict], settings: dict, page) -> list[Deal]:
+    """config.json の keywords を順にスキャンし、案件リストを返す。
+    page: main.run() で起動・使い回している Playwright ページ
+    （メルカリ相場ルックアップのたびにブラウザを起動しないようにするため）。
+    """
     all_deals: list[Deal] = []
 
     for kw_conf in keywords:
@@ -72,6 +142,7 @@ def run(dry_run: bool = False):
         )
 
         market = analyzer.get_market_price(
+            page,
             keyword,
             sample_count=settings["mercari_sold_sample_count"],
             cache_hours=settings["price_cache_hours"],
@@ -98,7 +169,7 @@ def run(dry_run: bool = False):
 
         print(f"  [メルカリ安値] 検索中...")
         cheap_items = mercari_scraper.get_cheap_listings(
-            keyword, max_price=max_buy,
+            page, keyword, max_price=max_buy,
             count=settings["search_items_per_source"],
             exclude_words=exclude_words,
         )
@@ -192,7 +263,7 @@ def run(dry_run: bool = False):
 
                 mercari_urls = [it.url for it in pending if it.source == "mercari_cheap"]
                 if mercari_urls:
-                    descriptions.update(mercari_scraper.get_descriptions(mercari_urls))
+                    descriptions.update(mercari_scraper.get_descriptions(page, mercari_urls))
 
                 for it in pending:
                     if it.source == "yahoo_auctions":
@@ -220,6 +291,7 @@ def run(dry_run: bool = False):
                     seen_models.add(model_key)
 
                 model_market = analyzer.get_market_price(
+                    page,
                     model_keyword,
                     sample_count=settings["mercari_sold_sample_count"],
                     cache_hours=settings["price_cache_hours"],
@@ -269,6 +341,7 @@ def run(dry_run: bool = False):
             p_min    = p_bucket
             p_max    = p_bucket * 6
             item_market = analyzer.get_market_price(
+                page,
                 keyword,
                 sample_count=settings["mercari_sold_sample_count"],
                 cache_hours=settings["price_cache_hours"],
@@ -299,49 +372,7 @@ def run(dry_run: bool = False):
         else:
             print(f"  --> 案件なし")
 
-    all_deals.sort(key=lambda d: d.estimated_profit, reverse=True)
-
-    print(f"\n{'=' * 50}")
-    print(f"スキャン完了: 合計 {len(all_deals)} 件")
-    print(f"{'=' * 50}")
-
-    # ──────────────────────────────────────────
-    # ダッシュボード出力
-    # ──────────────────────────────────────────
-    if dry_run:
-        print("\n[DRY RUN] DB保存・ダッシュボード更新をスキップします")
-        _print_summary(all_deals)
-        return
-
-    if all_deals:
-        scanned_at = datetime.now().isoformat()
-        database.save_scan_deals(all_deals, scanned_at)
-        print(f"\nDB保存完了: {len(all_deals)} 件 → scan_deals テーブル")
-
-    # ダッシュボードHTMLを再生成
-    import subprocess
-    result = subprocess.run(
-        [sys.executable, "generate_dashboard.py"],
-        capture_output=True, text=True,
-    )
-    if result.returncode == 0:
-        print(f"ダッシュボード生成完了: docs/index.html")
-    else:
-        print(f"[警告] ダッシュボード生成エラー: {result.stderr}")
-
-    # GitHub Pages に自動プッシュ
-    try:
-        subprocess.run(["git", "add", "docs/index.html", "docs/style.css", "docs/app.js"], check=True)
-        subprocess.run(
-            ["git", "commit", "-m",
-             f"Update dashboard: {len(all_deals)} deals ({datetime.now().strftime('%Y-%m-%d %H:%M')})"],
-            check=True,
-        )
-        subprocess.run(["git", "push"], check=True)
-        print("GitHub Pages 更新完了")
-    except subprocess.CalledProcessError as e:
-        print(f"[警告] git push 失敗: {e}")
-        print("手動で: git add docs/index.html && git commit -m 'Update' && git push")
+    return all_deals
 
 
 # ──────────────────────────────────────────────────────────────────────────────

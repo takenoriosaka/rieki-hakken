@@ -13,8 +13,24 @@ from typing import Optional
 
 from models import Item
 
+# スキャン全体で使い回すブラウザコンテキストの共通設定
+_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/120.0.0.0 Safari/537.36"
+)
+
+
+def new_page(browser):
+    """呼び出し元（main.py）が起動した Playwright ブラウザから、
+    スキャン全体で使い回すページを1つ生成する。
+    """
+    ctx = browser.new_context(locale="ja-JP", user_agent=_USER_AGENT)
+    return ctx.new_page()
+
 
 def get_sold_prices(
+    page,
     keyword: str,
     count: int = 30,
     exclude_words: list[str] | None = None,
@@ -25,69 +41,48 @@ def get_sold_prices(
     """メルカリの売却済み価格リストを返す。price_min/price_max で価格帯を絞り込める。
     required_words はカテゴリーをまたいで同じモデル名・型番が使われる場合の
     クロスコンタミネーション防止用（例: カルティエ「トリニティ」=指輪/サングラス両方に存在）。
+    page: 呼び出し元で起動・使い回している Playwright ページ（毎回ブラウザ起動しないため）。
     """
     search_keyword = _build_keyword(keyword, exclude_words)
     try:
-        from playwright.sync_api import sync_playwright
         return _playwright_sold_prices(
-            search_keyword, count, exclude_words, required_words, price_min, price_max
+            page, search_keyword, count, exclude_words, required_words, price_min, price_max
         )
-    except ImportError:
-        print("[Mercari] Playwright が未インストールです。setup.sh を実行してください。")
-        return []
     except Exception as e:
         print(f"[Mercari] 売却済み価格取得エラー ({keyword}): {e}")
         return []
 
 
-def get_descriptions(urls: list[str]) -> dict[str, str]:
+def get_descriptions(page, urls: list[str]) -> dict[str, str]:
     """複数の商品詳細ページから説明文を取得する（タイトルに型番がない場合のフォールバック用）。
-    ブラウザ起動コストを抑えるため、1ブラウザセッションで全URLを処理する。
+    page: 呼び出し元で起動・使い回している Playwright ページ。
     """
     if not urls:
         return {}
     try:
-        from playwright.sync_api import sync_playwright
-        return _playwright_descriptions(urls)
-    except ImportError:
-        print("[Mercari] Playwright が未インストールです。setup.sh を実行してください。")
-        return {}
+        return _playwright_descriptions(page, urls)
     except Exception as e:
         print(f"[Mercari] 説明文取得エラー: {e}")
         return {}
 
 
-def _playwright_descriptions(urls: list[str]) -> dict[str, str]:
-    from playwright.sync_api import sync_playwright
-
+def _playwright_descriptions(page, urls: list[str]) -> dict[str, str]:
     results: dict[str, str] = {}
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        ctx = browser.new_context(
-            locale="ja-JP",
-            user_agent=(
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
-        )
-        page = ctx.new_page()
-        for url in urls:
+    for url in urls:
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            # 商品の説明見出しがハイドレーションで描画されるまでポーリング待機
             try:
-                page.goto(url, wait_until="domcontentloaded", timeout=20000)
-                # 商品の説明見出しがハイドレーションで描画されるまでポーリング待機
-                try:
-                    page.wait_for_function(
-                        _HAS_DESCRIPTION_HEADING_JS, timeout=8000
-                    )
-                except Exception:
-                    pass  # 見出しが無い商品もある（説明文なし）
-                desc = page.evaluate(_EXTRACT_DESCRIPTION_JS)
-                if desc:
-                    results[url] = desc
-            except Exception as e:
-                print(f"[Mercari] 説明文取得エラー ({url}): {e}")
-        browser.close()
+                page.wait_for_function(
+                    _HAS_DESCRIPTION_HEADING_JS, timeout=8000
+                )
+            except Exception:
+                pass  # 見出しが無い商品もある（説明文なし）
+            desc = page.evaluate(_EXTRACT_DESCRIPTION_JS)
+            if desc:
+                results[url] = desc
+        except Exception as e:
+            print(f"[Mercari] 説明文取得エラー ({url}): {e}")
     return results
 
 
@@ -115,19 +110,18 @@ _EXTRACT_DESCRIPTION_JS = """
 
 
 def get_cheap_listings(
+    page,
     keyword: str,
     max_price: int,
     count: int = 40,
     exclude_words: list[str] | None = None,
 ) -> list[Item]:
-    """メルカリの格安出品中リストを返す（仕入れ候補）。除外ワードでタイトルフィルタリング。"""
+    """メルカリの格安出品中リストを返す（仕入れ候補）。除外ワードでタイトルフィルタリング。
+    page: 呼び出し元で起動・使い回している Playwright ページ。
+    """
     search_keyword = _build_keyword(keyword, exclude_words)
     try:
-        from playwright.sync_api import sync_playwright
-        return _playwright_cheap_listings(search_keyword, max_price, count, exclude_words)
-    except ImportError:
-        print("[Mercari] Playwright が未インストールです。setup.sh を実行してください。")
-        return []
+        return _playwright_cheap_listings(page, search_keyword, max_price, count, exclude_words)
     except Exception as e:
         print(f"[Mercari] 格安出品取得エラー ({keyword}): {e}")
         return []
@@ -138,12 +132,10 @@ def get_cheap_listings(
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _playwright_sold_prices(
-    keyword: str, count: int, exclude_words: list[str] | None = None,
+    page, keyword: str, count: int, exclude_words: list[str] | None = None,
     required_words: list[str] | None = None,
     price_min: int | None = None, price_max: int | None = None,
 ) -> list[int]:
-    from playwright.sync_api import sync_playwright
-
     # item_types=1 : フリマ（個人C2C）のみ。メルカリショップス（item_types=2）を除外
     url = (
         f"https://jp.mercari.com/search"
@@ -154,22 +146,10 @@ def _playwright_sold_prices(
     if price_max:
         url += f"&price_max={price_max}"
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        ctx = browser.new_context(
-            locale="ja-JP",
-            user_agent=(
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
-        )
-        page = ctx.new_page()
-        page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        _wait_for_items(page)
+    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    _wait_for_items(page)
 
-        raw = page.evaluate(_EXTRACT_SOLD_JS)
-        browser.close()
+    raw = page.evaluate(_EXTRACT_SOLD_JS)
 
     # タイトルに除外ワードが含まれるものを除去（Mercariは -word 構文非対応のため後処理）
     # required_words: 同名称が別カテゴリーにも存在する場合の混入防止（例: トリニティ=指輪/サングラス）
@@ -198,11 +178,9 @@ def _playwright_sold_prices(
 
 
 def _playwright_cheap_listings(
-    keyword: str, max_price: int, count: int,
+    page, keyword: str, max_price: int, count: int,
     exclude_words: list[str] | None = None,
 ) -> list[Item]:
-    from playwright.sync_api import sync_playwright
-
     # item_types=1 : フリマ（個人C2C）のみ。メルカリショップスを除外
     url = (
         f"https://jp.mercari.com/search"
@@ -210,22 +188,10 @@ def _playwright_cheap_listings(
         f"&price_max={max_price}&item_types=1"
     )
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        ctx = browser.new_context(
-            locale="ja-JP",
-            user_agent=(
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            ),
-        )
-        page = ctx.new_page()
-        page.goto(url, wait_until="domcontentloaded", timeout=30000)
-        _wait_for_items(page)
+    page.goto(url, wait_until="domcontentloaded", timeout=30000)
+    _wait_for_items(page)
 
-        raw = page.evaluate(_EXTRACT_LISTINGS_JS)
-        browser.close()
+    raw = page.evaluate(_EXTRACT_LISTINGS_JS)
 
     ex_lower = [w.lower() for w in exclude_words] if exclude_words else []
     items = []

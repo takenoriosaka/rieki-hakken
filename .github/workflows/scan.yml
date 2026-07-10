@@ -31,7 +31,7 @@ permissions:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 180
     steps:
       - name: Check if today is a scheduled scan day (every 3 days)
         id: check_day

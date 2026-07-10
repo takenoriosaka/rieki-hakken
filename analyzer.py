@@ -16,6 +16,7 @@ from scrapers import mercari as mercari_scraper
 
 
 def get_market_price(
+    page,
     keyword: str,
     sample_count: int = 30,
     cache_hours: int = 12,
@@ -27,6 +28,8 @@ def get_market_price(
     """メルカリ相場を取得（キャッシュ優先）。price_min/price_max で価格帯を限定できる。
     required_words: 同名称が別カテゴリーにも存在する場合の混入防止
     （例: カルティエ「トリニティ」=指輪/サングラス両方に存在するため相場が汚染されうる）。
+    page: 呼び出し元（main.py）で起動・使い回している Playwright ページ
+    （型番/価格帯ごとに毎回ブラウザを起動しないため）。
     """
     # キャッシュキー: 価格帯・必須ワード条件が異なれば別エントリにする
     cache_suffix = f"|{price_min or 0}-{price_max or 0}|{','.join(required_words or [])}"
@@ -47,7 +50,7 @@ def get_market_price(
     range_str = f" (¥{price_min:,}〜¥{price_max:,})" if (price_min or price_max) else ""
     print(f"  [Mercari] {keyword}{range_str} の売却済み価格を取得中...")
     prices = mercari_scraper.get_sold_prices(
-        keyword, count=sample_count, exclude_words=exclude_words,
+        page, keyword, count=sample_count, exclude_words=exclude_words,
         required_words=required_words, price_min=price_min, price_max=price_max,
     )
 
