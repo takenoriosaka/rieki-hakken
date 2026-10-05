@@ -30,6 +30,12 @@ from scrapers import vector_park, trefac_fashion, rakuma, yahoo_flea_market
 
 CONFIG_PATH = "config.json"
 
+# 商品説明文キャッシュの有効期限（時間）。説明文は出品後ほぼ変わらないため長めでよい
+DESCRIPTION_CACHE_HOURS = 24 * 7
+
+# スキャン統計（説明文。相場取得の統計は analyzer.stats）
+_stats = {"desc_fetched": 0, "desc_cached": 0}
+
 # 仕入れ先キー（Item.source と同じ値）→ ログ表示名。並び順＝検索順。
 SOURCE_LABELS = {
     "yahoo_auctions": "ヤフオク",
@@ -136,6 +142,12 @@ def scan(
     """
     from playwright.sync_api import sync_playwright
 
+    started = time.time()
+    analyzer.reset_session()
+    yahoo_auctions.reset_retry_state()
+    for k in _stats:
+        _stats[k] = 0
+
     # Playwright ブラウザはスキャン全体で1つだけ起動し使い回す（毎回起動すると
     # 型番/価格帯ごとのメルカリ相場ルックアップが数百回発生し、1件19秒前後×件数で
     # GitHub Actions のタイムアウトを超えていたため）。例外時も確実にクローズする。
@@ -153,6 +165,11 @@ def scan(
             browser.close()
     finally:
         playwright.stop()
+        st = analyzer.stats
+        print(f"\n[スキャン統計] 所要 {(time.time() - started) / 60:.1f}分 / "
+              f"メルカリ相場取得 {st['fetch']}回（うち0件 {st['zero']}回）/ "
+              f"DBキャッシュ利用 {st['db_cache']}回 / 同一スキャン内の再利用 {st['memo']}回 / "
+              f"説明文取得 {_stats['desc_fetched']}件（キャッシュ利用 {_stats['desc_cached']}件）")
 
 
 def _scan_keywords(
@@ -309,17 +326,32 @@ def _scan_keywords(
             # タイトルで型番が見つからなかったアイテムは商品説明文を確認する
             if pending:
                 print(f"    タイトルで型番なし {len(pending)}件 → 商品説明文を確認中...")
-                descriptions: dict[str, str] = {}
+                # 説明文は DB にキャッシュし、DESCRIPTION_CACHE_HOURS 以内に取得済みの
+                # 出品は再取得しない（安値順の出品は次回スキャンでも多くが残っているため）
+                target_urls = [it.url for it in pending
+                               if it.source in ("mercari_cheap", "yahoo_auctions")]
+                descriptions = database.get_cached_descriptions(
+                    target_urls, max_age_hours=DESCRIPTION_CACHE_HOURS)
+                _stats["desc_cached"] += len(descriptions)
+                fetched: dict[str, str] = {}
 
-                mercari_urls = [it.url for it in pending if it.source == "mercari_cheap"]
+                mercari_urls = [it.url for it in pending
+                                if it.source == "mercari_cheap" and it.url not in descriptions]
                 if mercari_urls:
-                    descriptions.update(mercari_scraper.get_descriptions(page, mercari_urls))
+                    got = mercari_scraper.get_descriptions(page, mercari_urls)
+                    _stats["desc_fetched"] += len(mercari_urls)
+                    # 説明文なし('')も記録する。ページ取得エラーの URL は含まれないので次回再取得
+                    fetched.update(got)
 
                 for it in pending:
-                    if it.source == "yahoo_auctions":
+                    if it.source == "yahoo_auctions" and it.url not in descriptions:
                         desc = yahoo_auctions.get_description(it.url)
-                        if desc:
-                            descriptions[it.url] = desc
+                        _stats["desc_fetched"] += 1
+                        if desc is not None:
+                            fetched[it.url] = desc
+
+                database.cache_descriptions(fetched)
+                descriptions.update(fetched)
 
                 for item in pending:
                     desc = descriptions.get(item.url)

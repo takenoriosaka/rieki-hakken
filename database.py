@@ -20,6 +20,14 @@ def init_db():
                 base_keyword TEXT NOT NULL DEFAULT ''
             );
 
+            -- 商品説明文キャッシュ（タイトルに型番がない出品の説明文。型番照合用）
+            -- description='' は「説明文なし」を取得済みという意味
+            CREATE TABLE IF NOT EXISTS description_cache (
+                url         TEXT PRIMARY KEY,
+                description TEXT NOT NULL,
+                fetched_at  TEXT NOT NULL
+            );
+
             -- 生徒ごとの配信済み案件（競合防止・重複防止）
             CREATE TABLE IF NOT EXISTS student_deals (
                 student_email TEXT NOT NULL,
@@ -115,6 +123,47 @@ def cache_price(keyword: str, avg_price: int, median_price: int,
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         """, (keyword, avg_price, median_price, min_price, max_price,
               sample_count, datetime.now().isoformat(), base_keyword))
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 商品説明文キャッシュ
+# ──────────────────────────────────────────────────────────────────────────────
+
+def get_cached_descriptions(urls: list[str], max_age_hours: int) -> dict[str, str]:
+    """取得済みの説明文を返す（{url: 説明文}。説明文なしで取得済みのものは ''）。"""
+    if not urls:
+        return {}
+    cutoff = (datetime.now() - timedelta(hours=max_age_hours)).isoformat()
+    out: dict[str, str] = {}
+    with _conn() as conn:
+        for i in range(0, len(urls), 500):
+            chunk = urls[i:i + 500]
+            marks = ",".join("?" * len(chunk))
+            rows = conn.execute(
+                f"SELECT url, description FROM description_cache "
+                f"WHERE url IN ({marks}) AND fetched_at > ?",
+                (*chunk, cutoff),
+            ).fetchall()
+            out.update({r[0]: r[1] for r in rows})
+    return out
+
+
+def cache_descriptions(descriptions: dict[str, str]) -> None:
+    """説明文を保存する（値 '' は説明文なし）。"""
+    if not descriptions:
+        return
+    now = datetime.now().isoformat()
+    with _conn() as conn:
+        conn.executemany(
+            "INSERT OR REPLACE INTO description_cache (url, description, fetched_at) "
+            "VALUES (?, ?, ?)",
+            [(u, d or "", now) for u, d in descriptions.items()],
+        )
+        # 古いものは掃除（DB肥大化防止）
+        conn.execute(
+            "DELETE FROM description_cache WHERE fetched_at < ?",
+            ((datetime.now() - timedelta(days=30)).isoformat(),),
+        )
 
 
 # ──────────────────────────────────────────────────────────────────────────────

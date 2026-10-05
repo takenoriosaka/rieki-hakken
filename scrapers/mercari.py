@@ -60,6 +60,7 @@ def get_sold_prices(
 
 def get_descriptions(page, urls: list[str]) -> dict[str, str]:
     """複数の商品詳細ページから説明文を取得する（タイトルに型番がない場合のフォールバック用）。
+    戻り値は {url: 説明文}。説明文が無い商品は ''、ページ取得エラーの URL は含まない。
     page: 呼び出し元で起動・使い回している Playwright ページ。
     """
     if not urls:
@@ -76,24 +77,38 @@ def _playwright_descriptions(page, urls: list[str]) -> dict[str, str]:
     for url in urls:
         try:
             page.goto(url, wait_until="domcontentloaded", timeout=20000)
-            # 商品の説明見出しがハイドレーションで描画されるまでポーリング待機
+            # 説明文（data-testid="description"）または「商品の説明」見出しが
+            # ハイドレーションで描画されるまで待機。全要素を走査する見出し判定は
+            # 重いため、まず data-testid を軽い間隔で確認する
             try:
                 page.wait_for_function(
-                    _HAS_DESCRIPTION_HEADING_JS, timeout=8000
+                    _HAS_DESCRIPTION_JS, timeout=8000, polling=200
                 )
             except Exception:
                 pass  # 見出しが無い商品もある（説明文なし）
-            desc = page.evaluate(_EXTRACT_DESCRIPTION_JS)
-            if desc:
-                results[url] = desc
+            desc = page.evaluate(_EXTRACT_DESCRIPTION_TESTID_JS) or page.evaluate(_EXTRACT_DESCRIPTION_JS)
+            # 説明文なしは ''（取得エラーの URL は結果に含めない＝呼び出し側で区別できる）
+            results[url] = desc or ""
         except Exception as e:
             print(f"[Mercari] 説明文取得エラー ({url}): {e}")
     return results
 
 
-_HAS_DESCRIPTION_HEADING_JS = """
-() => Array.from(document.querySelectorAll('*'))
-    .some(el => el.textContent.trim() === '商品の説明' && el.children.length === 0)
+_HAS_DESCRIPTION_JS = """
+() => {
+    const d = document.querySelector('[data-testid="description"]');
+    if (d && d.textContent.trim().length > 0) return true;
+    return Array.from(document.querySelectorAll('*'))
+        .some(el => el.children.length === 0 && el.textContent.trim() === '商品の説明');
+}
+"""
+
+_EXTRACT_DESCRIPTION_TESTID_JS = """
+() => {
+    const d = document.querySelector('[data-testid="description"]');
+    const t = d ? d.innerText.trim() : '';
+    return t.length > 0 ? t : null;
+}
 """
 
 _EXTRACT_DESCRIPTION_JS = """
@@ -226,26 +241,60 @@ def _playwright_cheap_listings(
     return items
 
 
+# 検索結果の「中身入りセル」（価格が描画済みのセル）の数
+_FILLED_COUNT_JS = """
+() => document.querySelectorAll('[data-testid="item-cell"] [data-testid="item-tile-price"]').length
+"""
+
+# 検索結果が描画された、または「0件」表示が出たら true
+# （0件のときに item-cell を15秒待ち続けないため。0件の型番は1スキャンで約200回ある）
+_RESULTS_OR_EMPTY_JS = """
+() => {
+    if (document.querySelector('[data-testid="item-cell"]')) return true;
+    const t = document.body ? document.body.innerText : '';
+    return t.includes('出品された商品がありません') || t.includes('該当する商品が見つかりません');
+}
+"""
+
+
 def _wait_for_items(page, timeout: int = 15000):
     try:
-        page.wait_for_selector(
-            '[data-testid="item-cell"], li[class*="item"], .item-cell',
-            timeout=timeout,
-        )
+        page.wait_for_function(_RESULTS_OR_EMPTY_JS, timeout=timeout, polling=250)
     except Exception:
-        time.sleep(2)
+        # 旧来の待ち方（構造変化で上の判定が効かなくなった場合の保険）
+        try:
+            page.wait_for_selector(
+                'li[class*="item"], .item-cell', timeout=2000,
+            )
+        except Exception:
+            pass
+    if not page.query_selector('[data-testid="item-cell"], li[class*="item"], .item-cell'):
+        return  # 0件。スクロールしても何も出ない
     # メルカリの検索結果は仮想スクロールで、初期表示では中身入りのセルが
     # 約10件しか描画されない。少しずつスクロールすると約90件まで描画される。
     _scroll_to_render(page)
 
 
-def _scroll_to_render(page, times: int = 4, wait_ms: int = 700):
+def _scroll_to_render(page, times: int = 4, wait_ms: int = 1000):
+    """少しずつスクロールして仮想スクロールのセルを描画させる。
+    各スクロール後は「中身入りセルが増えた時点」で次へ進み（固定待ちをしない）、
+    wait_ms 待っても増えなければ打ち切る（件数が少ない検索で無駄に待たない）。
+    最大スクロール回数は従来どおり times 回（取得件数は従来と同等）。
+    """
+    try:
+        prev = page.evaluate(_FILLED_COUNT_JS)
+    except Exception:
+        return
     for _ in range(times):
         try:
             page.mouse.wheel(0, 1500)
-            page.wait_for_timeout(wait_ms)
+            page.wait_for_function(
+                f"() => ({_FILLED_COUNT_JS.strip()})() > {prev}",
+                timeout=wait_ms, polling=100,
+            )
+            prev = page.evaluate(_FILLED_COUNT_JS)
         except Exception:
-            break
+            break   # 増えなくなった（全件描画済み or 末尾）→ 打ち切り
 
 
 def _parse_price(text: str) -> Optional[int]:

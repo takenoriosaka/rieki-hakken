@@ -1025,7 +1025,7 @@
     "mercari_commission_rate": 0.1,
     "assumed_shipping_cost": 700,
     "mercari_sold_sample_count": 30,
-    "price_cache_hours": 12,
+    "price_cache_hours": 80,
     "search_items_per_source": 80,
     "notify_hour": 8,
     "notify_minute": 0

@@ -15,6 +15,22 @@ from models import Deal, Item, MarketPrice
 from scrapers import mercari as mercari_scraper
 
 
+# ── 同一スキャン内のメモ（キャッシュキー → MarketPrice / None）──────────────
+# DBキャッシュ(price_cache)は売却実績0件の結果を保存しないため、0件の型番/モデルは
+# 同じスキャン内で何度も取りに行っていた（例: 同じ型番の出品が複数ある場合）。
+# スキャン開始時に reset_session() で空にし、0件(None)も含めて1スキャン1回にする。
+_session_memo: dict[str, Optional[MarketPrice]] = {}
+# スキャン統計（ログ末尾のサマリー用）
+stats = {"fetch": 0, "db_cache": 0, "memo": 0, "zero": 0}
+
+
+def reset_session() -> None:
+    """スキャン開始時に呼ぶ。同一スキャン内メモと統計をリセットする。"""
+    _session_memo.clear()
+    for k in stats:
+        stats[k] = 0
+
+
 def get_market_price(
     page,
     keyword: str,
@@ -41,10 +57,20 @@ def get_market_price(
         cache_suffix += f"|{filter_key}"
     cache_key = f"{keyword}{cache_suffix}" if (price_min or price_max or required_words or filter_key) else keyword
 
+    if cache_key in _session_memo:
+        stats["memo"] += 1
+        memo = _session_memo[cache_key]
+        if memo is None:
+            print(f"  [スキップ] {keyword}: このスキャンで取得済み（売却実績なし）")
+        else:
+            print(f"  [キャッシュ] {keyword}: 中央値 ¥{memo.median_price:,}（このスキャンで取得済み）")
+        return memo
+
     cached = database.get_cached_price(cache_key, max_age_hours=cache_hours)
     if cached:
+        stats["db_cache"] += 1
         print(f"  [キャッシュ] {keyword}: 中央値 ¥{cached['median_price']:,}")
-        return MarketPrice(
+        market = MarketPrice(
             keyword=keyword,
             avg_price=cached["avg_price"],
             median_price=cached["median_price"],
@@ -52,9 +78,12 @@ def get_market_price(
             max_price=cached["max_price"],
             sample_count=cached["sample_count"],
         )
+        _session_memo[cache_key] = market
+        return market
 
     range_str = f" (¥{price_min:,}〜¥{price_max:,})" if (price_min or price_max) else ""
     print(f"  [Mercari] {keyword}{range_str} の売却済み価格を取得中...")
+    stats["fetch"] += 1
     prices = mercari_scraper.get_sold_prices(
         page, keyword, count=sample_count, exclude_words=exclude_words,
         required_words=required_words, price_min=price_min, price_max=price_max,
@@ -63,6 +92,8 @@ def get_market_price(
 
     if len(prices) < 1:
         print(f"  [警告] {keyword}{range_str}: サンプル不足 ({len(prices)}件)")
+        stats["zero"] += 1
+        _session_memo[cache_key] = None
         return None
 
     # ── Step1: 上下10%カット（偽物・限定品などの極端な外れ値を除去）
@@ -94,6 +125,7 @@ def get_market_price(
         sample_count=len(prices),
     )
 
+    _session_memo[cache_key] = market
     database.cache_price(
         cache_key, avg, med, market.min_price, market.max_price, len(prices),
         base_keyword=keyword,
