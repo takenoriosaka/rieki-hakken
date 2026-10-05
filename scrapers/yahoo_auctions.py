@@ -8,6 +8,8 @@ Yahoo!オークション スクレイパー
 """
 
 import re
+import time
+
 import requests
 from bs4 import BeautifulSoup
 from models import Item
@@ -24,6 +26,52 @@ _HEADERS = {
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
     "Accept-Encoding": "gzip, deflate, br",
 }
+
+
+# ── 一時的なエラーのリトライ ──────────────────────────────────────────
+# 500/502/503/429 と接続エラー・タイムアウトは指数バックオフで最大3回リトライする。
+_RETRY_STATUSES = {429, 500, 502, 503}
+_RETRY_DELAYS = (5, 15, 45)     # 秒。1回目→2回目→3回目のリトライ前の待ち時間
+# リトライしても失敗したリクエストが連続したら、以降はリトライせず1回だけ試す
+# （ヤフオク側が実行環境ごと拒否している場合、毎回 65秒×件数 待つのを避ける）。
+# 1回でも成功したらリセットしてリトライを再開する。
+_GIVE_UP_AFTER = 3
+_consecutive_failures = 0
+
+
+def reset_retry_state() -> None:
+    """スキャン開始時に呼ぶ（前回スキャンでリトライを打ち切った状態を持ち越さない）。"""
+    global _consecutive_failures
+    _consecutive_failures = 0
+
+
+class _RetryableStatus(Exception):
+    pass
+
+
+def _get(url: str, params: dict | None = None, timeout: int = 15) -> requests.Response:
+    """GET してレスポンスを返す。一時的なエラーはリトライし、最終的に失敗したら例外を投げる。"""
+    global _consecutive_failures
+    delays = _RETRY_DELAYS if _consecutive_failures < _GIVE_UP_AFTER else ()
+    attempt = 0
+    while True:
+        try:
+            resp = requests.get(url, params=params, headers=_HEADERS, timeout=timeout)
+            if resp.status_code in _RETRY_STATUSES:
+                raise _RetryableStatus(f"{resp.status_code}")
+            resp.raise_for_status()
+            _consecutive_failures = 0
+            return resp
+        except (_RetryableStatus, requests.ConnectionError, requests.Timeout) as e:
+            if attempt >= len(delays):
+                _consecutive_failures += 1
+                if isinstance(e, _RetryableStatus):
+                    resp.raise_for_status()   # 従来と同じ HTTPError メッセージで呼び出し元へ
+                raise
+            wait = delays[attempt]
+            attempt += 1
+            print(f"[Yahoo Auctions] 一時エラー ({e}) → {wait}秒後に再試行 ({attempt}/{len(delays)})")
+            time.sleep(wait)
 
 
 def get_cheap_listings(
@@ -60,8 +108,7 @@ def get_cheap_listings(
         params["aucminprice"] = min_price
 
     try:
-        resp = requests.get(_SEARCH_URL, params=params, headers=_HEADERS, timeout=15)
-        resp.raise_for_status()
+        resp = _get(_SEARCH_URL, params=params)
         return _parse_results(resp.text, max_price)[:count]
     except Exception as e:
         print(f"[Yahoo Auctions] 取得エラー ({keyword}): {e}")
@@ -71,8 +118,7 @@ def get_cheap_listings(
 def get_description(url: str) -> str | None:
     """商品詳細ページから説明文を取得する（タイトルに型番がない場合のフォールバック用）。"""
     try:
-        resp = requests.get(url, headers=_HEADERS, timeout=15)
-        resp.raise_for_status()
+        resp = _get(url)
         soup = BeautifulSoup(resp.text, "lxml")
         el = soup.select_one("#description")
         return el.get_text(strip=True) if el else None
