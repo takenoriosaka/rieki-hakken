@@ -1,0 +1,48 @@
+/* ローカル リサーチ画面用（カード等は dashboard_assets/style.css を流用） */
+.wrap { max-width: 1000px; margin: 0 auto; padding: 12px; }
+.panel { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 14px; box-shadow: 0 2px 6px rgba(0,0,0,.07); }
+.panel-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.panel h2 { font-size: 16px; }
+.head-btns { display: flex; gap: 6px; }
+.mini-btn { border: 1px solid #ddd; border-radius: 8px; padding: 6px 12px; font-size: 12px; background: #fff; color: #444; cursor: pointer; font-family: inherit; }
+.mini-btn:hover { background: #f3f3f3; }
+.link-btn { border: none; background: none; color: #1a56b0; font-size: 12px; cursor: pointer; padding: 0 4px; font-family: inherit; }
+
+.group { border-top: 1px solid #f0f0f0; padding: 12px 0; }
+.group h3 { font-size: 13px; margin-bottom: 8px; color: #333; }
+.group h3 small { font-weight: 400; color: #999; font-size: 11px; }
+.group-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.row-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 0 18px; }
+
+.checks { display: flex; flex-wrap: wrap; gap: 6px; }
+.sub-title { font-size: 11px; color: #888; margin: 8px 0 4px; font-weight: 600; }
+.chk { display: inline-flex; align-items: center; gap: 5px; border: 1px solid #ddd; border-radius: 18px; padding: 5px 11px; font-size: 13px; cursor: pointer; background: #fff; user-select: none; }
+.chk input { accent-color: #e74c3c; width: 15px; height: 15px; margin: 0; }
+.chk:has(input:checked) { border-color: #e74c3c; background: #fff3f2; color: #b03a2e; font-weight: 600; }
+.chk .tag { font-size: 10px; color: #999; font-weight: 400; }
+.empty-note { font-size: 12px; color: #aaa; }
+
+.text-in { width: 100%; border: 1px solid #ddd; border-radius: 8px; padding: 8px 12px; font-size: 13px; margin-bottom: 4px; }
+.num-row { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-bottom: 8px; flex-wrap: wrap; }
+.num-row input, .num-row select { border: 1px solid #ddd; border-radius: 8px; padding: 6px 10px; font-size: 13px; width: 110px; font-family: inherit; }
+.num-row select { width: auto; }
+.check-line { display: flex; align-items: center; gap: 6px; font-size: 13px; margin-bottom: 4px; }
+.check-line input { accent-color: #e74c3c; }
+.hint { font-size: 11px; color: #999; line-height: 1.5; }
+
+.start-bar { display: flex; justify-content: space-between; align-items: center; gap: 12px; border-top: 1px solid #f0f0f0; padding-top: 14px; flex-wrap: wrap; }
+.plan-line { font-size: 13px; color: #555; }
+.start-btn { background: #e74c3c; color: #fff; border: none; border-radius: 10px; padding: 12px 34px; font-size: 15px; font-weight: 700; cursor: pointer; font-family: inherit; }
+.start-btn:hover { background: #c0392b; }
+.start-btn:disabled { background: #ccc; cursor: not-allowed; }
+.error-line { color: #c0392b; font-size: 13px; margin-top: 8px; }
+
+.bar { height: 10px; background: #f0f0f0; border-radius: 6px; overflow: hidden; }
+.bar-fill { height: 100%; width: 0; background: linear-gradient(90deg, #e74c3c, #c0392b); transition: width .4s; }
+.progress-text { font-size: 13px; color: #444; margin: 8px 0; }
+details summary { font-size: 12px; color: #888; cursor: pointer; }
+.log { background: #1e1e1e; color: #ddd; font-size: 11px; line-height: 1.5; padding: 10px; border-radius: 8px; max-height: 260px; overflow: auto; white-space: pre-wrap; margin-top: 6px; }
+
+.badge-remain { background: #ffebee; color: #b71c1c; }
+.badge-remain.later { background: #eceff1; color: #455a64; }
+.badge-bin { background: #eceff1; color: #455a64; }

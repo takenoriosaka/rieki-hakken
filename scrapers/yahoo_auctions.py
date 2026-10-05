@@ -156,12 +156,25 @@ def _parse_product(li, max_price: int):
 
     image_url = a.get("data-auction-img") or None
 
+    # 終了時刻: 検索結果の .Product__bonus に data-auction-endtime（UNIX秒）が入っている
+    # （2026-10 時点で確認。表示上の「残り 5日」等は .Product__time）
+    end_time = None
+    endtime_attr = bonus.get("data-auction-endtime", "") if bonus else ""
+    if endtime_attr.isdigit():
+        end_time = int(endtime_attr)
+    # 即決価格あり（定額・即決）やフリマ出品は「オークション形式」ではない扱い
+    is_flea = bool(a.get("data-auction-isflea"))
+    has_buynow = buynow_attr.isdigit() and int(buynow_attr) > 0
+    is_auction = not has_buynow and not is_flea
+
     return Item(
         title=title,
         price=price,
         url=url,
         source="yahoo_auctions",
         image_url=image_url,
+        end_time=end_time,
+        is_auction=is_auction,
     )
 
 

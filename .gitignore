@@ -5,3 +5,11 @@ __pycache__/
 *.pyc
 logs/
 .DS_Store
+
+# ローカルのリサーチ画面(app.py)の前回結果
+local_results/
+
+# DB バックアップ・スキャンの一時ログ
+arbitrage.db.bak-*
+scan_output_*.log
+*.log

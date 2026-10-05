@@ -15,6 +15,7 @@ GitHub Pagesへ自動publishする。
 
 import argparse
 import json
+import os
 import sys
 import time
 from datetime import datetime
@@ -28,6 +29,16 @@ from scrapers import mercari as mercari_scraper
 from scrapers import vector_park, trefac_fashion, rakuma, yahoo_flea_market
 
 CONFIG_PATH = "config.json"
+
+# 仕入れ先キー（Item.source と同じ値）→ ログ表示名。並び順＝検索順。
+SOURCE_LABELS = {
+    "yahoo_auctions": "ヤフオク",
+    "mercari_cheap":  "メルカリ安値",
+    "vector_park":    "ベクトルパーク",
+    "trefac":         "トレファク",
+    "rakuma":         "ラクマ",
+    "yahoo_flea":     "Yahoo!フリマ",
+}
 
 
 def run(dry_run: bool = False):
@@ -44,25 +55,14 @@ def run(dry_run: bool = False):
     # ──────────────────────────────────────────
     # スキャン
     # ──────────────────────────────────────────
-    # Playwright ブラウザはスキャン全体で1つだけ起動し使い回す（毎回起動すると
-    # 型番/価格帯ごとのメルカリ相場ルックアップが数百回発生し、1件19秒前後×件数で
-    # GitHub Actions のタイムアウトを超えていたため）。例外時も確実にクローズする。
+    # 実処理は scan()（ローカルのリサーチ画面 app.py と共用）
     try:
-        from playwright.sync_api import sync_playwright
+        import playwright.sync_api  # noqa: F401
     except ImportError:
         print("[エラー] Playwright が未インストールです。setup.sh を実行してください。")
         sys.exit(1)
 
-    playwright = sync_playwright().start()
-    try:
-        browser = playwright.chromium.launch(headless=True)
-        try:
-            page = mercari_scraper.new_page(browser)
-            all_deals: list[Deal] = _scan_keywords(keywords, settings, page)
-        finally:
-            browser.close()
-    finally:
-        playwright.stop()
+    all_deals: list[Deal] = scan(keywords, settings)
 
     all_deals.sort(key=lambda d: d.estimated_profit, reverse=True)
 
@@ -75,6 +75,14 @@ def run(dry_run: bool = False):
     # ──────────────────────────────────────────
     if dry_run:
         print("\n[DRY RUN] DB保存・ダッシュボード更新をスキップします")
+        _print_summary(all_deals)
+        return
+
+    # ローカルのリサーチ画面（app.py）は scan() しか呼ばないが、万一 run() が
+    # 呼ばれても DB保存・Pages用ファイル生成・git push をしないよう、
+    # app.py が立てる環境変数で二重に防止する。
+    if os.environ.get("RIEKI_LOCAL_APP") == "1":
+        print("[ローカル画面] DB保存・ダッシュボード生成・git push はスキップしました")
         _print_summary(all_deals)
         return
 
@@ -109,14 +117,62 @@ def run(dry_run: bool = False):
         print("手動で: git add docs/index.html && git commit -m 'Update' && git push")
 
 
-def _scan_keywords(keywords: list[dict], settings: dict, page) -> list[Deal]:
+def scan(
+    keywords: list[dict],
+    settings: dict,
+    sources=None,
+    item_filter=None,
+    progress=None,
+    should_stop=None,
+) -> list[Deal]:
+    """Playwright ブラウザを1つ起動してキーワード群をスキャンし、案件リストを返す。
+    DB保存・ダッシュボード生成・git push は一切行わない（それらは run() 側の責務）。
+    ローカルのリサーチ画面（app.py）からもこの関数を呼ぶ。
+
+    sources:     検索する仕入れ先キーの集合（None なら全仕入れ先）。SOURCE_LABELS 参照
+    item_filter: 仕入れ候補 Item を受け取り True/False を返す関数（相場計算前に適用）
+    progress:    progress(index, total, keyword) 形式のコールバック（index は 0 始まり）
+    should_stop: True を返すとキーワードの切れ目で中断する関数
+    """
+    from playwright.sync_api import sync_playwright
+
+    # Playwright ブラウザはスキャン全体で1つだけ起動し使い回す（毎回起動すると
+    # 型番/価格帯ごとのメルカリ相場ルックアップが数百回発生し、1件19秒前後×件数で
+    # GitHub Actions のタイムアウトを超えていたため）。例外時も確実にクローズする。
+    playwright = sync_playwright().start()
+    try:
+        browser = playwright.chromium.launch(headless=True)
+        try:
+            page = mercari_scraper.new_page(browser)
+            return _scan_keywords(
+                keywords, settings, page,
+                sources=sources, item_filter=item_filter,
+                progress=progress, should_stop=should_stop,
+            )
+        finally:
+            browser.close()
+    finally:
+        playwright.stop()
+
+
+def _scan_keywords(
+    keywords: list[dict], settings: dict, page,
+    sources=None, item_filter=None, progress=None, should_stop=None,
+) -> list[Deal]:
     """config.json の keywords を順にスキャンし、案件リストを返す。
-    page: main.run() で起動・使い回している Playwright ページ
+    page: scan() で起動・使い回している Playwright ページ
     （メルカリ相場ルックアップのたびにブラウザを起動しないようにするため）。
+    sources / item_filter / progress / should_stop は scan() の説明を参照。
     """
     all_deals: list[Deal] = []
+    total = len(keywords)
 
-    for kw_conf in keywords:
+    for kw_index, kw_conf in enumerate(keywords):
+        if should_stop and should_stop():
+            print("\n[中断] ユーザー操作によりスキャンを中断しました")
+            break
+        if progress:
+            progress(kw_index, total, kw_conf["name"])
         keyword              = kw_conf["name"]
         max_buy              = kw_conf["max_buy_price"]
         min_buy              = kw_conf.get("min_buy_price", 0)
@@ -154,68 +210,52 @@ def _scan_keywords(keywords: list[dict], settings: dict, page) -> list[Deal]:
             continue
 
         sources_items = []
+        per_source = settings["search_items_per_source"]
 
-        print(f"  [ヤフオク] 検索中...")
-        yahoo_items = yahoo_auctions.get_cheap_listings(
-            keyword, max_price=max_buy,
-            min_price=min_buy,
-            count=settings["search_items_per_source"],
-            exclude_words=exclude_words,
-            immediate_only=immediate_only,
-        )
-        print(f"  [ヤフオク] {len(yahoo_items)} 件")
-        sources_items.extend(yahoo_items)
-        time.sleep(1)
-
-        print(f"  [メルカリ安値] 検索中...")
-        cheap_items = mercari_scraper.get_cheap_listings(
-            page, keyword, max_price=max_buy,
-            count=settings["search_items_per_source"],
-            exclude_words=exclude_words,
-        )
-        print(f"  [メルカリ安値] {len(cheap_items)} 件")
-        sources_items.extend(cheap_items)
-        time.sleep(1)
-
-        print(f"  [ベクトルパーク] 検索中...")
-        vector_park_items = vector_park.get_cheap_listings(
-            keyword, max_price=max_buy, min_price=min_buy,
-            count=settings["search_items_per_source"],
-            exclude_words=exclude_words,
-        )
-        print(f"  [ベクトルパーク] {len(vector_park_items)} 件")
-        sources_items.extend(vector_park_items)
-        time.sleep(1)
-
-        print(f"  [トレファク] 検索中...")
-        trefac_items = trefac_fashion.get_cheap_listings(
-            keyword, max_price=max_buy, min_price=min_buy,
-            count=settings["search_items_per_source"],
-            exclude_words=exclude_words,
-        )
-        print(f"  [トレファク] {len(trefac_items)} 件")
-        sources_items.extend(trefac_items)
-        time.sleep(1)
-
-        print(f"  [ラクマ] 検索中...")
-        rakuma_items = rakuma.get_cheap_listings(
-            keyword, max_price=max_buy, min_price=min_buy,
-            count=settings["search_items_per_source"],
-            exclude_words=exclude_words,
-        )
-        print(f"  [ラクマ] {len(rakuma_items)} 件")
-        sources_items.extend(rakuma_items)
-        time.sleep(1)
-
-        print(f"  [Yahoo!フリマ] 検索中...")
-        yahoo_flea_items = yahoo_flea_market.get_cheap_listings(
-            keyword, max_price=max_buy, min_price=min_buy,
-            count=settings["search_items_per_source"],
-            exclude_words=exclude_words,
-        )
-        print(f"  [Yahoo!フリマ] {len(yahoo_flea_items)} 件")
-        sources_items.extend(yahoo_flea_items)
-        time.sleep(1)
+        # (仕入れ先キー, 取得関数) の順に検索する。sources で選ばれたものだけ実行
+        fetchers = [
+            ("yahoo_auctions", lambda: yahoo_auctions.get_cheap_listings(
+                keyword, max_price=max_buy,
+                min_price=min_buy,
+                count=per_source,
+                exclude_words=exclude_words,
+                immediate_only=immediate_only,
+            )),
+            ("mercari_cheap", lambda: mercari_scraper.get_cheap_listings(
+                page, keyword, max_price=max_buy,
+                count=per_source,
+                exclude_words=exclude_words,
+            )),
+            ("vector_park", lambda: vector_park.get_cheap_listings(
+                keyword, max_price=max_buy, min_price=min_buy,
+                count=per_source,
+                exclude_words=exclude_words,
+            )),
+            ("trefac", lambda: trefac_fashion.get_cheap_listings(
+                keyword, max_price=max_buy, min_price=min_buy,
+                count=per_source,
+                exclude_words=exclude_words,
+            )),
+            ("rakuma", lambda: rakuma.get_cheap_listings(
+                keyword, max_price=max_buy, min_price=min_buy,
+                count=per_source,
+                exclude_words=exclude_words,
+            )),
+            ("yahoo_flea", lambda: yahoo_flea_market.get_cheap_listings(
+                keyword, max_price=max_buy, min_price=min_buy,
+                count=per_source,
+                exclude_words=exclude_words,
+            )),
+        ]
+        for source_key, fetch in fetchers:
+            if sources is not None and source_key not in sources:
+                continue
+            label = SOURCE_LABELS[source_key]
+            print(f"  [{label}] 検索中...")
+            fetched = fetch()
+            print(f"  [{label}] {len(fetched)} 件")
+            sources_items.extend(fetched)
+            time.sleep(1)
 
         # sekaist (2nd Street) disabled: Cloudflare WAF blocks all requests, no API alternative
 
@@ -227,14 +267,24 @@ def _scan_keywords(keywords: list[dict], settings: dict, page) -> list[Deal]:
         #    → 他ブランドやあいまいマッチによる誤混入を防ぐ
         if effective_required:
             before = len(sources_items)
+            # 大文字小文字は区別しない（THE NORTH FACE / The North Face など）
+            req_lower = [w.lower() for w in effective_required]
             sources_items = [
                 item for item in sources_items
-                if any(w in item.title for w in effective_required)
+                if any(w in item.title.lower() for w in req_lower)
             ]
             removed = before - len(sources_items)
             if removed > 0:
                 print(f"  [タイトルフィルター] {removed} 件除外 "
                       f"({'|'.join(effective_required)} なし)")
+
+        # 呼び出し元指定の追加条件（ローカル画面の「オークション残り時間」など）
+        if item_filter is not None:
+            before = len(sources_items)
+            sources_items = [item for item in sources_items if item_filter(item)]
+            removed = before - len(sources_items)
+            if removed > 0:
+                print(f"  [条件フィルター] {removed} 件除外")
 
         # ── 型番照合モード ──────────────────────────────────────
         # require_model_number=true の場合:
@@ -342,6 +392,7 @@ def _scan_keywords(keywords: list[dict], settings: dict, page) -> list[Deal]:
                     deal.brand = brand_name
                     deal.model = model
                     deal.category = category
+                    deal.search_keyword = keyword
                     model_deals.append(deal)
 
             model_deals.sort(key=lambda d: d.estimated_profit, reverse=True)
@@ -392,6 +443,7 @@ def _scan_keywords(keywords: list[dict], settings: dict, page) -> list[Deal]:
             if deal:
                 deal.brand = brand_name
                 deal.category = category
+                deal.search_keyword = keyword
                 deals.append(deal)
 
         deals.sort(key=lambda d: d.estimated_profit, reverse=True)

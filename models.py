@@ -9,6 +9,11 @@ class Item:
     url: str
     source: str  # "yahoo_auctions" | "mercari_cheap" | "sekaist"
     image_url: Optional[str] = None
+    # オークション形式の商品のみ設定（ヤフオク）。終了時刻の UNIX 秒。
+    end_time: Optional[int] = None
+    # True = 入札で落とすオークション形式（即決価格なし）。
+    # 即決/定額/フリマ形式は False（残り時間の絞り込み対象外）。
+    is_auction: bool = False
 
 
 @dataclass
@@ -34,6 +39,7 @@ class Deal:
     brand: str = ""
     model: str = ""
     category: str = ""
+    search_keyword: str = ""   # この案件を見つけた検索キーワード（型番照合時も元のキーワード）
 
     def format_source(self) -> str:
         labels = {
