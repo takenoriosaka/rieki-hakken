@@ -223,6 +223,18 @@ def _wait_for_items(page, timeout: int = 15000):
         )
     except Exception:
         time.sleep(2)
+    # メルカリの検索結果は仮想スクロールで、初期表示では中身入りのセルが
+    # 約10件しか描画されない。少しずつスクロールすると約90件まで描画される。
+    _scroll_to_render(page)
+
+
+def _scroll_to_render(page, times: int = 4, wait_ms: int = 700):
+    for _ in range(times):
+        try:
+            page.mouse.wheel(0, 1500)
+            page.wait_for_timeout(wait_ms)
+        except Exception:
+            break
 
 
 def _parse_price(text: str) -> Optional[int]:
@@ -249,6 +261,7 @@ _EXTRACT_SOLD_JS = """
     // セルが取れなかった場合は価格エレメント直接取得にフォールバック
     if (cells.length === 0) {
         const priceSelectors = [
+            '[data-testid="item-cell"] [data-testid="item-tile-price"]',
             '[data-testid="item-cell"] [class*="price"]',
             'li[class*="item"] [class*="price"]',
             '.item-cell [class*="price"]',
@@ -272,10 +285,12 @@ _EXTRACT_SOLD_JS = """
         );
         if (shopBadge) return;
 
-        const titleEl = cell.querySelector(
+        // 2026-09 以降クラス名がランダム化されたため data-testid を優先し、
+        // 旧クラス指定は予備として残す（必ず item-cell の内側だけを探す）
+        const titleEl = cell.querySelector('[data-testid="thumbnail-item-name"]') || cell.querySelector(
             '[class*="itemName"], [class*="name"], h3, [class*="title"]'
         );
-        const priceEl = cell.querySelector(
+        const priceEl = cell.querySelector('[data-testid="item-tile-price"]') || cell.querySelector(
             '[class*="price"], [class*="Price"], [class*="itemPrice"]'
         );
         if (priceEl) {
@@ -324,11 +339,13 @@ _EXTRACT_LISTINGS_JS = """
         );
         if (shopBadge) return;
 
-        const a = cell.querySelector('a');
-        const titleEl = cell.querySelector(
+        const a = cell.querySelector('a[data-testid="thumbnail-link"]') || cell.querySelector('a');
+        // 2026-09 以降クラス名がランダム化されたため data-testid を優先し、
+        // 旧クラス指定は予備として残す（必ず item-cell の内側だけを探す）
+        const titleEl = cell.querySelector('[data-testid="thumbnail-item-name"]') || cell.querySelector(
             '[class*="itemName"], [class*="name"], h3, [class*="title"]'
         );
-        const priceEl = cell.querySelector(
+        const priceEl = cell.querySelector('[data-testid="item-tile-price"]') || cell.querySelector(
             '[class*="price"], [class*="Price"]'
         );
         const imgEl = cell.querySelector('img');
