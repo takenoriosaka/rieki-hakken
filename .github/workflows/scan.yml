@@ -31,7 +31,9 @@ permissions:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+    # GitHub-hosted runner の上限は 360分。通常は 90分以内に終わる想定だが、
+    # メルカリ側が遅い日でも途中で打ち切られないよう余裕を持たせる
+    timeout-minutes: 350
     steps:
       - name: Check if today is a scheduled scan day (every 3 days)
         id: check_day
@@ -94,4 +96,7 @@ jobs:
       # そのため Actions 側で追加の git diff / commit / push は行わない。
       - name: Run scan (scan -> DB save -> dashboard regenerate -> git push)
         if: steps.check_day.outputs.run == 'true'
+        # 出力をバッファせず即時に出す（ログのタイムスタンプで所要時間を分析できるように）
+        env:
+          PYTHONUNBUFFERED: "1"
         run: python main.py
