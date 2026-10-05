@@ -171,7 +171,11 @@ def load_scan_deals(days: int = 7) -> list[dict]:
             """,
             (cutoff,),
         ).fetchall()
-    return [dict(r) for r in rows]
+    out = [dict(r) for r in rows]
+    for r in out:   # 旧ジャンル名（ジュエリー）→ アクセサリー
+        if r.get("category") == "ジュエリー":
+            r["category"] = "アクセサリー"
+    return out
 
 
 def load_market_reference() -> list[dict]:

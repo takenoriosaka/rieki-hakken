@@ -693,7 +693,7 @@
       ],
       "require_model_number": true,
       "brand_name": "カルティエ",
-      "category": "ジュエリー"
+      "category": "アクセサリー"
     },
     {
       "name": "ティファニー ジュエリー",
@@ -724,7 +724,7 @@
       ],
       "require_model_number": true,
       "brand_name": "ティファニー",
-      "category": "ジュエリー"
+      "category": "アクセサリー"
     },
     {
       "name": "ヴァンクリーフ&アーペル ジュエリー",
@@ -755,7 +755,7 @@
       ],
       "require_model_number": true,
       "brand_name": "ヴァンクリーフ&アーペル",
-      "category": "ジュエリー"
+      "category": "アクセサリー"
     },
     {
       "name": "ブルガリ ジュエリー",
@@ -787,7 +787,7 @@
       ],
       "require_model_number": true,
       "brand_name": "ブルガリ",
-      "category": "ジュエリー"
+      "category": "アクセサリー"
     },
     {
       "name": "エルメス スカーフ",

@@ -4,6 +4,10 @@
 const SOURCE_LABELS = { yahoo_auctions: 'ヤフオク', mercari_cheap: 'メルカリ安値', sekaist: 'セカスト', vector_park: 'ベクトルパーク', trefac: 'トレファク', rakuma: 'ラクマ', yahoo_flea: 'Yahoo!フリマ' };
 const SOURCE_BADGE_CLASS = { yahoo_auctions: 'badge-yahoo', mercari_cheap: 'badge-mercari', sekaist: 'badge-sekaist', vector_park: 'badge-vectorpark', trefac: 'badge-trefac', rakuma: 'badge-rakuma', yahoo_flea: 'badge-yahoofuri' };
 
+// 旧ジャンル名 → 現在のジャンル名（過去データに「ジュエリー」が残っていても「アクセサリー」で表示）
+const CATEGORY_RENAMES = { 'ジュエリー': 'アクセサリー' };
+DEALS.forEach(d => { if (d && CATEGORY_RENAMES[d.category]) d.category = CATEGORY_RENAMES[d.category]; });
+
 let currentCategory = '';
 let currentBrand = '';
 let currentSort = 'profit';
