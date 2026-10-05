@@ -290,6 +290,16 @@ def _scan_keywords(keywords: list[dict], settings: dict, page) -> list[Deal]:
                 if model_key not in seen_models:
                     seen_models.add(model_key)
 
+                # 厳密照合ブランド（デュベティカ・ノースフェイス等）のモデル名は、
+                # 売却済みタイトルも同じモデル名と判定されるものだけで相場を出す
+                # （ディオニシオ に ディオニシオドゥエ、ヌプシジャケット に ショートヌプシ を混ぜない）
+                name_filter, filter_key = None, ""
+                if (model_extractor.is_strict_brand(brand_name)
+                        and model_extractor.extract_name(model, brand_name) == model):
+                    name_filter = (lambda t, _m=model, _b=brand_name:
+                                   model_extractor.extract_name(t, _b) == _m)
+                    filter_key = f"model:{model}"
+
                 model_market = analyzer.get_market_price(
                     page,
                     model_keyword,
@@ -297,7 +307,27 @@ def _scan_keywords(keywords: list[dict], settings: dict, page) -> list[Deal]:
                     cache_hours=settings["price_cache_hours"],
                     exclude_words=exclude_words,
                     required_words=effective_required,
+                    title_filter=name_filter,
+                    filter_key=filter_key,
                 )
+                # カタカナ名で売却実績が見つからない（3件未満）モデルは英字表記でも探し、
+                # 件数の多い方を採用する（例: デュベティカ「フェーベ」はタイトルの多くが FEBE 表記）
+                if name_filter is not None and (model_market is None or model_market.sample_count < 3):
+                    en = model_extractor.english_name(model)
+                    if en:
+                        en_market = analyzer.get_market_price(
+                            page,
+                            f"{brand_name} {en}",
+                            sample_count=settings["mercari_sold_sample_count"],
+                            cache_hours=settings["price_cache_hours"],
+                            exclude_words=exclude_words,
+                            required_words=effective_required,
+                            title_filter=name_filter,
+                            filter_key=filter_key,
+                        )
+                        if en_market and (model_market is None
+                                          or en_market.sample_count > model_market.sample_count):
+                            model_market = en_market
                 if model_market is None:
                     print(f"    [{model}] メルカリ相場なし → スキップ")
                     continue  # メルカリで型番確認できず → スキップ

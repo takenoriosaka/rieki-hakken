@@ -24,16 +24,22 @@ def get_market_price(
     required_words: list[str] | None = None,
     price_min: int | None = None,
     price_max: int | None = None,
+    title_filter=None,
+    filter_key: str = "",
 ) -> Optional[MarketPrice]:
     """メルカリ相場を取得（キャッシュ優先）。price_min/price_max で価格帯を限定できる。
     required_words: 同名称が別カテゴリーにも存在する場合の混入防止
     （例: カルティエ「トリニティ」=指輪/サングラス両方に存在するため相場が汚染されうる）。
     page: 呼び出し元（main.py）で起動・使い回している Playwright ページ
     （型番/価格帯ごとに毎回ブラウザを起動しないため）。
+    title_filter / filter_key: 売却済みタイトルの追加条件と、そのキャッシュ識別子
+    （例: モデル名「ディオニシオ」で照合 → filter_key="model:ディオニシオ"）。
     """
     # キャッシュキー: 価格帯・必須ワード条件が異なれば別エントリにする
     cache_suffix = f"|{price_min or 0}-{price_max or 0}|{','.join(required_words or [])}"
-    cache_key = f"{keyword}{cache_suffix}" if (price_min or price_max or required_words) else keyword
+    if filter_key:
+        cache_suffix += f"|{filter_key}"
+    cache_key = f"{keyword}{cache_suffix}" if (price_min or price_max or required_words or filter_key) else keyword
 
     cached = database.get_cached_price(cache_key, max_age_hours=cache_hours)
     if cached:
@@ -52,6 +58,7 @@ def get_market_price(
     prices = mercari_scraper.get_sold_prices(
         page, keyword, count=sample_count, exclude_words=exclude_words,
         required_words=required_words, price_min=price_min, price_max=price_max,
+        title_filter=title_filter,
     )
 
     if len(prices) < 1:

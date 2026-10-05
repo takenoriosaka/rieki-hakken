@@ -12,6 +12,7 @@ import random
 from typing import Optional
 
 from models import Item
+import model_extractor
 
 # スキャン全体で使い回すブラウザコンテキストの共通設定
 _USER_AGENT = (
@@ -37,16 +38,20 @@ def get_sold_prices(
     required_words: list[str] | None = None,
     price_min: int | None = None,
     price_max: int | None = None,
+    title_filter=None,
 ) -> list[int]:
     """メルカリの売却済み価格リストを返す。price_min/price_max で価格帯を絞り込める。
     required_words はカテゴリーをまたいで同じモデル名・型番が使われる場合の
     クロスコンタミネーション防止用（例: カルティエ「トリニティ」=指輪/サングラス両方に存在）。
     page: 呼び出し元で起動・使い回している Playwright ページ（毎回ブラウザ起動しないため）。
+    title_filter: タイトル(元の表記)を受け取り True/False を返す追加条件
+    （例: デュベティカ「ディオニシオ」の相場に「ディオニシオドゥエ」を混ぜない）。
     """
     search_keyword = _build_keyword(keyword, exclude_words)
     try:
         return _playwright_sold_prices(
-            page, search_keyword, count, exclude_words, required_words, price_min, price_max
+            page, search_keyword, count, exclude_words, required_words, price_min, price_max,
+            title_filter=title_filter,
         )
     except Exception as e:
         print(f"[Mercari] 売却済み価格取得エラー ({keyword}): {e}")
@@ -135,6 +140,7 @@ def _playwright_sold_prices(
     page, keyword: str, count: int, exclude_words: list[str] | None = None,
     required_words: list[str] | None = None,
     price_min: int | None = None, price_max: int | None = None,
+    title_filter=None,
 ) -> list[int]:
     # item_types=1 : フリマ（個人C2C）のみ。メルカリショップス（item_types=2）を除外
     url = (
@@ -156,6 +162,8 @@ def _playwright_sold_prices(
     # brand_token: keyword の先頭単語（ブランド名）。Mercariのあいまい検索は他ブランドの
     # 商品を紛れ込ませることがあるため（例: 「ブルガリ ジュエリー」検索にルイヴィトン商品が混入）、
     # タイトルにブランド名が含まれない候補は相場サンプルから除外する
+    # （DUVETICA/デュベティカ、THE NORTH FACE/ノースフェイス等の表記ゆれは
+    #   model_extractor.BRAND_ALIASES で吸収する）
     prices = []
     ex_lower  = [w.lower() for w in exclude_words] if exclude_words else []
     req_lower = [w.lower() for w in required_words] if required_words else []
@@ -165,12 +173,15 @@ def _playwright_sold_prices(
         price = r.get("price", 0)
         if price <= 0:
             continue
-        title = r.get("title", "").lower()
+        raw_title = r.get("title", "")
+        title = raw_title.lower()
         if ex_lower and any(w in title for w in ex_lower):
             continue
         if req_lower and not any(w in title for w in req_lower):
             continue
-        if brand_token and brand_token not in title:
+        if brand_token and not model_extractor.has_brand(title, kw_tokens[0]):
+            continue
+        if title_filter is not None and not title_filter(raw_title):
             continue
         prices.append(price)
 
