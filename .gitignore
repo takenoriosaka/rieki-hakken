@@ -13,3 +13,10 @@ local_results/
 arbitrage.db.bak-*
 scan_output_*.log
 *.log
+
+# 知り合いモードのマーカー（setup_for_friend.command が作成）
+.rieki_friend_mode
+# SQLite の一時ファイル（price_cache などは arbitrage.db 内）
+*.db-journal
+*.db-wal
+*.db-shm
