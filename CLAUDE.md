@@ -38,3 +38,12 @@ python generate_dashboard.py --open  # ダッシュボードHTMLだけ再生成�
 - `docs/index.html` - 生成済みダッシュボード（GitHub Pages: `takenoriosaka/rieki-hakken` リポジトリ）
 - `arbitrage.db` - SQLiteキャッシュ・履歴DB（gitignore済み）
 - `.env` - 現在このプロジェクトで必要な環境変数はありません（gitignore済み）
+
+## 知り合いとの共有（2026-10 追加）
+- 知り合いは `setup_for_friend.command` で ~/rieki-hakken にセットアップ（gh でログイン、uv で Python 3.12 の venv）。
+  手順は `知り合い向け_使い方.md`。
+- `start.command` は起動前に `git fetch` → 新版があれば `git pull --ff-only`。失敗しても警告だけで起動。
+  requirements.txt / Playwright のバージョンが変わったら自動で入れ直す（印: venv/.rieki_*）。
+- `.rieki_friend_mode`（git 管理外）がある環境＝知り合いの Mac だけ、追跡ファイルのローカル変更を git stash してから更新する。
+  本人の Mac にはこのファイルを置かないこと（置くと未コミット変更が stash される）。
+- config.json は git 管理。型番を追加して commit & push すれば、知り合いの次回起動時に反映される。
