@@ -4,13 +4,13 @@
 #
 #  このファイル 1 つだけで、次のことを全部自動で行います。
 #    1. git（Apple 純正の開発ツール）があるか確認
-#    2. GitHub にログイン（GitHub CLI を使用。管理者パスワード不要）
-#    3. ツール本体をダウンロード（~/rieki-hakken）
-#    4. Python とライブラリを準備（uv を使用。管理者パスワード不要）
-#    5. ブラウザ部品（Chromium）を準備
-#    6. デスクトップに「利益発見ツール」を作成
-#    7. ツールを起動してブラウザで画面を開く
+#    2. ツール本体をダウンロード（~/rieki-hakken。公開リポジトリなのでログイン不要）
+#    3. Python とライブラリを準備（uv を使用。管理者パスワード不要）
+#    4. ブラウザ部品（Chromium）を準備
+#    5. デスクトップに「利益発見ツール」を作成
+#    6. ツールを起動してブラウザで画面を開く
 #
+#  GitHub のアカウントやログインは不要です。
 #  何度実行しても大丈夫です（済んでいる作業は飛ばします）。
 #
 #  開き方（どちらか）:
@@ -19,18 +19,16 @@
 # =====================================================================
 
 # --- 設定（テスト時は環境変数で差し替え可能） ---
-REPO="${RIEKI_REPO:-takenoriosaka/rieki-hakken}"
+REPO_URL="${RIEKI_REPO_URL:-https://github.com/takenoriosaka/rieki-hakken.git}"
 APP_DIR="${RIEKI_DIR:-$HOME/rieki-hakken}"
-TOOLS_DIR="${RIEKI_TOOLS_DIR:-$HOME/rieki-hakken-tools}"
 UV_DIR="${RIEKI_UV_DIR:-$HOME/.local/bin}"
 DESKTOP_DIR="${RIEKI_DESKTOP:-$HOME/Desktop}"
 SHORTCUT_NAME="利益発見ツール"
 PY_VERSION="3.12"
 
-export PATH="$UV_DIR:$TOOLS_DIR/bin:$PATH"
-export GH_NO_UPDATE_NOTIFIER=1
+export PATH="$UV_DIR:$PATH"
 
-TOTAL=7
+TOTAL=6
 
 line() { echo "------------------------------------------------------------"; }
 step() { echo; line; echo " $1/$TOTAL  $2"; line; }
@@ -64,11 +62,10 @@ main() {
     echo
     echo "============================================================"
     echo "   利益発見ツール  初回セットアップを始めます"
-    echo "   （10〜20分ほどかかります。途中で GitHub へのログインがあります）"
+    echo "   （10〜20分ほどかかります。途中で操作することは基本的にありません）"
     echo "============================================================"
 
     step_git
-    step_gh
     step_clone
     step_python
     step_playwright
@@ -77,7 +74,7 @@ main() {
 }
 
 # ---------------------------------------------------------------------
-# 1/7 git
+# 1/6 git
 # ---------------------------------------------------------------------
 step_git() {
     step 1 "git（Apple 純正の開発ツール）を確認しています…"
@@ -96,99 +93,10 @@ step_git() {
 }
 
 # ---------------------------------------------------------------------
-# 2/7 GitHub CLI（gh）とログイン
-# ---------------------------------------------------------------------
-install_gh() {
-    local arch tag ver url tmp
-    case "$(uname -m)" in
-        arm64)  arch=arm64 ;;
-        x86_64) arch=amd64 ;;
-        *) fail "この Mac の種類（$(uname -m)）に対応していません。" "この画面のスクリーンショットを送ってください。" ;;
-    esac
-
-    # 最新版の番号を調べる（github.com の「latest」の転送先から取得。API の回数制限を受けない）
-    tag="$(curl -fsSI --max-time 30 https://github.com/cli/cli/releases/latest 2>/dev/null \
-            | tr -d '\r' | awk 'tolower($1)=="location:"{print $2}' | sed 's#.*/tag/##' | tail -n 1)"
-    [ -n "$tag" ] || fail "GitHub CLI の最新版を確認できませんでした（インターネットにつながっていない可能性があります）。" \
-                         "Wi-Fi などインターネット接続を確認してください。" \
-                         "そのあと、このセットアップファイルをもう一度開いてください。"
-    ver="${tag#v}"
-    url="https://github.com/cli/cli/releases/download/${tag}/gh_${ver}_macOS_${arch}.zip"
-
-    echo "  GitHub CLI ${ver}（${arch}）をダウンロードしています…"
-    tmp="$(mktemp -d)"
-    if ! curl -fL --max-time 300 --retry 2 -o "$tmp/gh.zip" "$url"; then
-        rm -rf "$tmp"
-        fail "GitHub CLI をダウンロードできませんでした。" \
-             "インターネット接続を確認して、このセットアップファイルをもう一度開いてください。"
-    fi
-    if ! unzip -q -o "$tmp/gh.zip" -d "$tmp"; then
-        rm -rf "$tmp"
-        fail "GitHub CLI の展開に失敗しました。" "このセットアップファイルをもう一度開いてください。"
-    fi
-    mkdir -p "$TOOLS_DIR/bin"
-    rm -rf "$TOOLS_DIR/gh"
-    mv "$tmp/gh_${ver}_macOS_${arch}" "$TOOLS_DIR/gh" \
-        || { rm -rf "$tmp"; fail "GitHub CLI の配置に失敗しました。" "このセットアップファイルをもう一度開いてください。"; }
-    rm -rf "$tmp"
-    ln -sf "$TOOLS_DIR/gh/bin/gh" "$TOOLS_DIR/bin/gh"
-    xattr -dr com.apple.quarantine "$TOOLS_DIR/gh" 2>/dev/null || true
-    "$TOOLS_DIR/bin/gh" --version >/dev/null 2>&1 \
-        || fail "GitHub CLI を起動できませんでした。" "このセットアップファイルをもう一度開いてください。"
-}
-
-step_gh() {
-    step 2 "GitHub へのログインを準備しています…"
-    if command -v gh >/dev/null 2>&1; then
-        ok "GitHub CLI は準備済みです（$(gh --version | head -n 1)）"
-    else
-        install_gh
-        ok "GitHub CLI を準備しました"
-    fi
-    [ "${RIEKI_SKIP_AUTH:-}" = "1" ] && { echo "  （テスト: ログインは省略）"; return; }
-
-    if gh auth status --hostname github.com >/dev/null 2>&1; then
-        ok "GitHub にはログイン済みです"
-    else
-        echo
-        echo "  これから GitHub にログインします。次の順番で進めてください。"
-        echo
-        echo "   ① 下に「! First copy your one-time code: XXXX-XXXX」と出ます。"
-        echo "      この XXXX-XXXX（英数字 8 けた）がワンタイムコードです。メモするか覚えておいてください。"
-        echo "   ②「Press Enter to open github.com in your browser...」と出たら、Enter キーを押します。"
-        echo "      → ブラウザで GitHub の画面が開きます（開かないときは https://github.com/login/device を開く）。"
-        echo "   ③ GitHub にログインしていなければ、登録したメールアドレスとパスワードでログインします。"
-        echo "   ④「Device Activation」の画面で「Continue」を押し、"
-        echo "      ①のコードを入力して「Continue」→「Authorize github」を押します。"
-        echo "   ⑤「Congratulations, you're all set!」と出たら、この黒い画面に戻ってください。"
-        echo "      （「Authenticate Git with your GitHub credentials?」と聞かれたら、そのまま Enter）"
-        echo
-        if ! gh auth login --hostname github.com --web --git-protocol https; then
-            fail "GitHub へのログインが完了しませんでした。" \
-                 "このセットアップファイルをもう一度開いて、ログインをやり直してください。" \
-                 "コードの入力は 15 分以内に行ってください。"
-        fi
-    fi
-    gh auth setup-git --hostname github.com >/dev/null 2>&1 \
-        || fail "git に GitHub のログイン情報を設定できませんでした。" "このセットアップファイルをもう一度開いてください。"
-    ok "git に GitHub のログイン情報を設定しました"
-
-    if ! gh repo view "$REPO" >/dev/null 2>&1; then
-        local who
-        who="$(gh api user --jq .login 2>/dev/null)"
-        fail "ツールの保管場所（${REPO}）を開く権限がありません（ログイン中のアカウント: ${who:-不明}）。" \
-             "招待メール（GitHub から届く「invited you to collaborate」）の「View invitation」→「Accept invitation」を押してください。" \
-             "招待がまだ届いていなければ、ツールを紹介してくれた人に GitHub のユーザー名（${who:-あなたのユーザー名}）を伝えてください。" \
-             "承認できたら、このセットアップファイルをもう一度開いてください。"
-    fi
-    ok "ツールの保管場所にアクセスできました"
-}
-
-# ---------------------------------------------------------------------
-# 3/7 ツール本体
+# 2/6 ツール本体
 # ---------------------------------------------------------------------
 step_clone() {
-    step 3 "ツール本体をダウンロードしています…（保存先: ${APP_DIR}）"
+    step 2 "ツール本体をダウンロードしています…（保存先: ${APP_DIR}）"
     if [ -d "$APP_DIR/.git" ]; then
         echo "  すでにダウンロード済みです。最新版に更新します…"
         if ! (cd "$APP_DIR" && GIT_TERMINAL_PROMPT=0 git pull --ff-only --quiet); then
@@ -199,10 +107,12 @@ step_clone() {
              "Finder でホームフォルダを開き、「rieki-hakken」の名前を「rieki-hakken-old」などに変えてください。" \
              "そのあと、このセットアップファイルをもう一度開いてください。"
     else
-        if ! GIT_TERMINAL_PROMPT=0 gh repo clone "$REPO" "$APP_DIR" -- --quiet; then
+        # 公開リポジトリなので認証不要。GIT_TERMINAL_PROMPT=0 で、万一ログインを求められても入力待ちで止まらないようにする
+        if ! GIT_TERMINAL_PROMPT=0 git clone --quiet "$REPO_URL" "$APP_DIR"; then
             rm -rf "$APP_DIR"
             fail "ツール本体をダウンロードできませんでした。" \
-                 "インターネット接続を確認して、このセットアップファイルをもう一度開いてください。"
+                 "インターネット接続を確認して、このセットアップファイルをもう一度開いてください。" \
+                 "それでもだめなときは、この画面のスクリーンショットを紹介者に送ってください。"
         fi
     fi
     [ -f "$APP_DIR/start.command" ] && [ -f "$APP_DIR/requirements.txt" ] \
@@ -214,7 +124,7 @@ step_clone() {
 }
 
 # ---------------------------------------------------------------------
-# 4/7 Python（uv）
+# 3/6 Python（uv）
 # ---------------------------------------------------------------------
 venv_ok() {
     [ -x "$APP_DIR/venv/bin/python" ] && \
@@ -222,7 +132,7 @@ venv_ok() {
 }
 
 step_python() {
-    step 4 "Python とライブラリを準備しています…（数分かかります）"
+    step 3 "Python とライブラリを準備しています…（数分かかります）"
     if ! command -v uv >/dev/null 2>&1; then
         echo "  uv（Python の準備ツール）をダウンロードしています…"
         mkdir -p "$UV_DIR"
@@ -261,10 +171,10 @@ step_python() {
 }
 
 # ---------------------------------------------------------------------
-# 5/7 Chromium
+# 4/6 Chromium
 # ---------------------------------------------------------------------
 step_playwright() {
-    step 5 "ブラウザ部品（Chromium）を準備しています…（数分かかります）"
+    step 4 "ブラウザ部品（Chromium）を準備しています…（数分かかります）"
     cd "$APP_DIR" || exit 1
     if [ "${RIEKI_SKIP_PLAYWRIGHT:-}" = "1" ]; then
         echo "  （テスト: Chromium のインストールは省略）"
@@ -281,10 +191,10 @@ step_playwright() {
 }
 
 # ---------------------------------------------------------------------
-# 6/7 デスクトップの起動用ファイル
+# 5/6 デスクトップの起動用ファイル
 # ---------------------------------------------------------------------
 step_shortcut() {
-    step 6 "デスクトップに「${SHORTCUT_NAME}」を作っています…"
+    step 5 "デスクトップに「${SHORTCUT_NAME}」を作っています…"
     mkdir -p "$DESKTOP_DIR"
     local f="$DESKTOP_DIR/$SHORTCUT_NAME.command"
     # 自分の Mac で作ったファイルなので、ダブルクリックでそのまま開ける（Gatekeeper の警告は出ない）
@@ -298,10 +208,10 @@ EOF
 }
 
 # ---------------------------------------------------------------------
-# 7/7 起動
+# 6/6 起動
 # ---------------------------------------------------------------------
 step_launch() {
-    step 7 "ツールを起動しています…"
+    step 6 "ツールを起動しています…"
     echo
     echo "  ★ セットアップが完了しました！"
     echo "    まもなくブラウザでリサーチ画面（http://127.0.0.1:8765）が開きます。"

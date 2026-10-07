@@ -3,7 +3,7 @@
 # 終了するときは、このターミナル画面で Ctrl+C を押すか、ウィンドウを閉じてください。
 #
 # 起動前に自動で最新版を取得します（git pull --ff-only）。
-#   - ネット不通・認証切れ・ローカル変更などで取得できないときは、警告だけ出して今の版で起動します。
+#   - ネット不通・ローカル変更などで取得できないときは、警告だけ出して今の版で起動します。
 #   - requirements.txt が変わっていたらライブラリを自動で入れ直し、
 #     Playwright のバージョンが変わっていたら Chromium も入れ直します。
 #   - 「知り合いモード」（セットアップ時に作る .rieki_friend_mode がある場合）だけ、
@@ -63,10 +63,10 @@ update_repo() {
     [ -f .rieki_friend_mode ] && friend=1
     local GITNET=(-c http.lowSpeedLimit=1000 -c http.lowSpeedTime=20)
 
-    # まず取得だけ行う（ネット不通・認証切れならここで分かる。この段階では作業ツリーに触れない）
+    # まず取得だけ行う（公開リポジトリなので認証不要。ネット不通ならここで分かる。この段階では作業ツリーに触れない）
     if ! out="$(GIT_TERMINAL_PROMPT=0 git "${GITNET[@]}" fetch --quiet 2>&1)"; then
         echo "[注意] 最新版を確認できませんでした。今の版のまま起動します。"
-        echo "       （インターネット接続や GitHub のログイン状態を確認してください）"
+        echo "       （インターネット接続を確認してください）"
         echo "$out" | sed -n '1,3p' | sed 's/^/       > /'
         return 0
     fi

@@ -40,9 +40,10 @@ python generate_dashboard.py --open  # ダッシュボードHTMLだけ再生成�
 - `.env` - 現在このプロジェクトで必要な環境変数はありません（gitignore済み）
 
 ## 知り合いとの共有（2026-10 追加）
-- 知り合いは `setup_for_friend.command` で ~/rieki-hakken にセットアップ（gh でログイン、uv で Python 3.12 の venv）。
+- リポジトリ `takenoriosaka/rieki-hakken` は **public** で運用（招待・GitHub アカウントは不要）。個人情報や秘密情報をコミットしないこと。
+- 知り合いは `setup_for_friend.command` で ~/rieki-hakken にセットアップ（`git clone https://github.com/takenoriosaka/rieki-hakken.git`、ログイン不要。uv で Python 3.12 の venv）。
   手順は `知り合い向け_使い方.md`。
-- `start.command` は起動前に `git fetch` → 新版があれば `git pull --ff-only`。失敗しても警告だけで起動。
+- `start.command` は起動前に `git fetch` → 新版があれば `git pull --ff-only`（public なので認証不要）。失敗しても警告だけで起動。
   requirements.txt / Playwright のバージョンが変わったら自動で入れ直す（印: venv/.rieki_*）。
 - `.rieki_friend_mode`（git 管理外）がある環境＝知り合いの Mac だけ、追跡ファイルのローカル変更を git stash してから更新する。
   本人の Mac にはこのファイルを置かないこと（置くと未コミット変更が stash される）。
