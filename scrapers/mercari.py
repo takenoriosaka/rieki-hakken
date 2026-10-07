@@ -47,6 +47,26 @@ def get_sold_prices(
     title_filter: タイトル(元の表記)を受け取り True/False を返す追加条件
     （例: デュベティカ「ディオニシオ」の相場に「ディオニシオドゥエ」を混ぜない）。
     """
+    return [r["price"] for r in get_sold_items(
+        page, keyword, count=count, exclude_words=exclude_words,
+        required_words=required_words, price_min=price_min, price_max=price_max,
+        title_filter=title_filter,
+    )]
+
+
+def get_sold_items(
+    page,
+    keyword: str,
+    count: int = 30,
+    exclude_words: list[str] | None = None,
+    required_words: list[str] | None = None,
+    price_min: int | None = None,
+    price_max: int | None = None,
+    title_filter=None,
+) -> list[dict]:
+    """get_sold_prices() と同じ条件で、売却済み商品を {"price", "title", "url"} で返す。
+    複数の検索語（カタカナ名・英字名）の結果を商品URLで重複除去して合算するときに使う。
+    """
     search_keyword = _build_keyword(keyword, exclude_words)
     try:
         return _playwright_sold_prices(
@@ -156,7 +176,7 @@ def _playwright_sold_prices(
     required_words: list[str] | None = None,
     price_min: int | None = None, price_max: int | None = None,
     title_filter=None,
-) -> list[int]:
+) -> list[dict]:
     # item_types=1 : フリマ（個人C2C）のみ。メルカリショップス（item_types=2）を除外
     url = (
         f"https://jp.mercari.com/search"
@@ -198,7 +218,7 @@ def _playwright_sold_prices(
             continue
         if title_filter is not None and not title_filter(raw_title):
             continue
-        prices.append(price)
+        prices.append({"price": price, "title": raw_title, "url": r.get("url", "")})
 
     return prices[:count]
 
@@ -353,6 +373,8 @@ _EXTRACT_SOLD_JS = """
         const priceEl = cell.querySelector('[data-testid="item-tile-price"]') || cell.querySelector(
             '[class*="price"], [class*="Price"], [class*="itemPrice"]'
         );
+        // 商品URL（カタカナ名・英字名の検索結果を合算するときの重複除去に使う）
+        const a = cell.querySelector('a[data-testid="thumbnail-link"]') || cell.querySelector('a');
         if (priceEl) {
             const text = priceEl.textContent.replace(/[^\\d]/g, '');
             const n = parseInt(text, 10);
@@ -360,6 +382,7 @@ _EXTRACT_SOLD_JS = """
                 items.push({
                     title: titleEl ? titleEl.textContent.trim() : '',
                     price: n,
+                    url: a ? a.href : '',
                 });
             }
         }

@@ -42,6 +42,7 @@ def get_market_price(
     price_max: int | None = None,
     title_filter=None,
     filter_key: str = "",
+    alt_keywords: list[str] | None = None,
 ) -> Optional[MarketPrice]:
     """メルカリ相場を取得（キャッシュ優先）。price_min/price_max で価格帯を限定できる。
     required_words: 同名称が別カテゴリーにも存在する場合の混入防止
@@ -50,26 +51,32 @@ def get_market_price(
     （型番/価格帯ごとに毎回ブラウザを起動しないため）。
     title_filter / filter_key: 売却済みタイトルの追加条件と、そのキャッシュ識別子
     （例: モデル名「ディオニシオ」で照合 → filter_key="model:ディオニシオ"）。
+    alt_keywords: 同じモデルの別表記での検索語（例: keyword="デュベティカ ディオニシオ",
+    alt_keywords=["デュベティカ DIONISIO"]）。全検索語の売却済みを商品URLで重複除去して
+    合算してから相場を出す。キャッシュキーは「検索語1+検索語2」になり、単独検索の結果とは混ざらない。
     """
+    keywords = [keyword] + [k for k in (alt_keywords or []) if k and k != keyword]
+    label = " + ".join(keywords)
     # キャッシュキー: 価格帯・必須ワード条件が異なれば別エントリにする
     cache_suffix = f"|{price_min or 0}-{price_max or 0}|{','.join(required_words or [])}"
     if filter_key:
         cache_suffix += f"|{filter_key}"
-    cache_key = f"{keyword}{cache_suffix}" if (price_min or price_max or required_words or filter_key) else keyword
+    base_key = "+".join(keywords)
+    cache_key = f"{base_key}{cache_suffix}" if (price_min or price_max or required_words or filter_key) else base_key
 
     if cache_key in _session_memo:
         stats["memo"] += 1
         memo = _session_memo[cache_key]
         if memo is None:
-            print(f"  [スキップ] {keyword}: このスキャンで取得済み（売却実績なし）")
+            print(f"  [スキップ] {label}: このスキャンで取得済み（売却実績なし）")
         else:
-            print(f"  [キャッシュ] {keyword}: 中央値 ¥{memo.median_price:,}（このスキャンで取得済み）")
+            print(f"  [キャッシュ] {label}: 中央値 ¥{memo.median_price:,}（このスキャンで取得済み）")
         return memo
 
     cached = database.get_cached_price(cache_key, max_age_hours=cache_hours)
     if cached:
         stats["db_cache"] += 1
-        print(f"  [キャッシュ] {keyword}: 中央値 ¥{cached['median_price']:,}")
+        print(f"  [キャッシュ] {label}: 中央値 ¥{cached['median_price']:,}")
         market = MarketPrice(
             keyword=keyword,
             avg_price=cached["avg_price"],
@@ -82,16 +89,38 @@ def get_market_price(
         return market
 
     range_str = f" (¥{price_min:,}〜¥{price_max:,})" if (price_min or price_max) else ""
-    print(f"  [Mercari] {keyword}{range_str} の売却済み価格を取得中...")
-    stats["fetch"] += 1
-    prices = mercari_scraper.get_sold_prices(
-        page, keyword, count=sample_count, exclude_words=exclude_words,
-        required_words=required_words, price_min=price_min, price_max=price_max,
-        title_filter=title_filter,
-    )
+    if len(keywords) == 1:
+        print(f"  [Mercari] {keyword}{range_str} の売却済み価格を取得中...")
+        stats["fetch"] += 1
+        prices = mercari_scraper.get_sold_prices(
+            page, keyword, count=sample_count, exclude_words=exclude_words,
+            required_words=required_words, price_min=price_min, price_max=price_max,
+            title_filter=title_filter,
+        )
+    else:
+        # カタカナ名・英字名などの複数表記で取得し、商品URLで重複を除いて合算する
+        prices = []
+        seen: set[str] = set()
+        for kw in keywords:
+            print(f"  [Mercari] {kw}{range_str} の売却済み価格を取得中...")
+            stats["fetch"] += 1
+            got = mercari_scraper.get_sold_items(
+                page, kw, count=sample_count, exclude_words=exclude_words,
+                required_words=required_words, price_min=price_min, price_max=price_max,
+                title_filter=title_filter,
+            )
+            added = 0
+            for r in got:
+                key = r.get("url") or f"{r.get('title', '')}|{r['price']}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                prices.append(r["price"])
+                added += 1
+            print(f"    → {len(got)}件（重複除外後 +{added}件）")
 
     if len(prices) < 1:
-        print(f"  [警告] {keyword}{range_str}: サンプル不足 ({len(prices)}件)")
+        print(f"  [警告] {label}{range_str}: サンプル不足 ({len(prices)}件)")
         stats["zero"] += 1
         _session_memo[cache_key] = None
         return None
@@ -131,7 +160,7 @@ def get_market_price(
         base_keyword=keyword,
     )
     band = f"¥{int(low):,}〜¥{int(high):,}"
-    print(f"  [Mercari] {keyword}{range_str}: 中央値 ¥{med:,} / 平均 ¥{avg:,}"
+    print(f"  [Mercari] {label}{range_str}: 中央値 ¥{med:,} / 平均 ¥{avg:,}"
           f" ({len(final)}/{len(prices)}件, ±20%帯: {band})")
     return market
 

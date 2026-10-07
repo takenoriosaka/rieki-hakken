@@ -189,7 +189,8 @@ def _scan_keywords(
             print("\n[中断] ユーザー操作によりスキャンを中断しました")
             break
         if progress:
-            progress(kw_index, total, kw_conf["name"])
+            # 英字名でも検索するモデルは「カタカナ / 英字」の両方の検索語を表示する
+            progress(kw_index, total, " / ".join(kw_conf.get("search_queries") or [kw_conf["name"]]))
         keyword              = kw_conf["name"]
         max_buy              = kw_conf["max_buy_price"]
         min_buy              = kw_conf.get("min_buy_price", 0)
@@ -200,11 +201,16 @@ def _scan_keywords(
         brand_name           = kw_conf.get("brand_name", keyword.split()[0])
         category             = kw_conf.get("category", "")
 
+        # 仕入れ先の検索語。ローカル画面でモデル名を選んだ場合は「カタカナ名」「英字名」の
+        # 2本が search_queries に入る（app.build_plan）。通常のキーワードは keyword の1本だけ
+        queries = [q for q in (kw_conf.get("search_queries") or [keyword]) if q]
         excl_str = f" 除外:{exclude_words}" if exclude_words else ""
         req_str  = f" 必須:{required_words}" if required_words else ""
         imm_str  = " [即決のみ]" if immediate_only else ""
         mdl_str  = " [型番照合]" if require_model_number else ""
         print(f"\n■ [{keyword}] 検索中... (¥{min_buy:,}〜¥{max_buy:,}){imm_str}{mdl_str}{excl_str}{req_str}")
+        if len(queries) > 1:
+            print(f"  検索語: {' / '.join(queries)}")
 
         # required_words（明示設定）がなければブランド名（キーワード第1単語）を自動適用。
         # メルカリ相場検索にも同じ条件を使い、仕入れ候補と相場のカテゴリーを一致させる
@@ -231,48 +237,60 @@ def _scan_keywords(
 
         # (仕入れ先キー, 取得関数) の順に検索する。sources で選ばれたものだけ実行
         fetchers = [
-            ("yahoo_auctions", lambda: yahoo_auctions.get_cheap_listings(
-                keyword, max_price=max_buy,
+            ("yahoo_auctions", lambda q: yahoo_auctions.get_cheap_listings(
+                q, max_price=max_buy,
                 min_price=min_buy,
                 count=per_source,
                 exclude_words=exclude_words,
                 immediate_only=immediate_only,
             )),
-            ("mercari_cheap", lambda: mercari_scraper.get_cheap_listings(
-                page, keyword, max_price=max_buy,
+            ("mercari_cheap", lambda q: mercari_scraper.get_cheap_listings(
+                page, q, max_price=max_buy,
                 count=per_source,
                 exclude_words=exclude_words,
             )),
-            ("vector_park", lambda: vector_park.get_cheap_listings(
-                keyword, max_price=max_buy, min_price=min_buy,
+            ("vector_park", lambda q: vector_park.get_cheap_listings(
+                q, max_price=max_buy, min_price=min_buy,
                 count=per_source,
                 exclude_words=exclude_words,
             )),
-            ("trefac", lambda: trefac_fashion.get_cheap_listings(
-                keyword, max_price=max_buy, min_price=min_buy,
+            ("trefac", lambda q: trefac_fashion.get_cheap_listings(
+                q, max_price=max_buy, min_price=min_buy,
                 count=per_source,
                 exclude_words=exclude_words,
             )),
-            ("rakuma", lambda: rakuma.get_cheap_listings(
-                keyword, max_price=max_buy, min_price=min_buy,
+            ("rakuma", lambda q: rakuma.get_cheap_listings(
+                q, max_price=max_buy, min_price=min_buy,
                 count=per_source,
                 exclude_words=exclude_words,
             )),
-            ("yahoo_flea", lambda: yahoo_flea_market.get_cheap_listings(
-                keyword, max_price=max_buy, min_price=min_buy,
+            ("yahoo_flea", lambda q: yahoo_flea_market.get_cheap_listings(
+                q, max_price=max_buy, min_price=min_buy,
                 count=per_source,
                 exclude_words=exclude_words,
             )),
         ]
+        seen_item_urls: set[str] = set()
         for source_key, fetch in fetchers:
             if sources is not None and source_key not in sources:
                 continue
             label = SOURCE_LABELS[source_key]
-            print(f"  [{label}] 検索中...")
-            fetched = fetch()
-            print(f"  [{label}] {len(fetched)} 件")
-            sources_items.extend(fetched)
-            time.sleep(1)
+            for q in queries:
+                q_str = f" 「{q}」" if len(queries) > 1 else ""
+                print(f"  [{label}]{q_str} 検索中...")
+                fetched = fetch(q)
+                # 複数の検索語で同じ出品が出るため商品URLで重複を除く
+                new_items = []
+                for it in fetched:
+                    if it.url and it.url in seen_item_urls:
+                        continue
+                    seen_item_urls.add(it.url)
+                    new_items.append(it)
+                dup = len(fetched) - len(new_items)
+                dup_str = f"（重複 {dup} 件除外）" if dup else ""
+                print(f"  [{label}]{q_str} {len(fetched)} 件{dup_str}")
+                sources_items.extend(new_items)
+                time.sleep(1)
 
         # sekaist (2nd Street) disabled: Cloudflare WAF blocks all requests, no API alternative
 
@@ -317,7 +335,7 @@ def _scan_keywords(
             for item in sources_items:
                 if item.price < min_buy:
                     continue
-                model = model_extractor.extract(item.title, brand_name)
+                model = model_extractor.extract(item.title, brand_name, category)
                 if model:
                     candidates.append((item, model))
                 else:
@@ -357,7 +375,7 @@ def _scan_keywords(
                     desc = descriptions.get(item.url)
                     if not desc:
                         continue
-                    model = model_extractor.extract(desc, brand_name)
+                    model = model_extractor.extract(desc, brand_name, category)
                     if model:
                         candidates.append((item, model))
 
@@ -372,14 +390,26 @@ def _scan_keywords(
                 if model_key not in seen_models:
                     seen_models.add(model_key)
 
-                # 厳密照合ブランド（デュベティカ・ノースフェイス等）のモデル名は、
-                # 売却済みタイトルも同じモデル名と判定されるものだけで相場を出す
-                # （ディオニシオ に ディオニシオドゥエ、ヌプシジャケット に ショートヌプシ を混ぜない）
-                name_filter, filter_key = None, ""
-                if (model_extractor.is_strict_brand(brand_name)
-                        and model_extractor.extract_name(model, brand_name) == model):
+                # モデル名（型番でないもの）は、売却済みタイトルも同じモデルと判定されるものだけで
+                # 相場を出す（ディオニシオ に ディオニシオドゥエ、ヌプシジャケット に ショートヌプシ、
+                # ビーゼロワン に セーブザチルドレン を混ぜない）。
+                # さらにカタカナ名・英字名の両方で売却済みを取得し、商品URLで重複を除いて合算する
+                # （例: デュベティカ「フェーベ」はタイトルの多くが FEBE 表記）。
+                # 英字名が無い・同じ表記のモデルは1回だけ検索する。
+                name_filter, filter_key, alt_keywords = None, "", None
+                canon = model_extractor.extract_name(model, brand_name)
+                if canon == model:
                     name_filter = (lambda t, _m=model, _b=brand_name:
                                    model_extractor.extract_name(t, _b) == _m)
+                    filter_key = f"model:{model}"
+                    names = model_extractor.search_names(model, brand_name)
+                    model_keyword = f"{brand_name} {names[0]}"
+                    alt_keywords = [f"{brand_name} {n}" for n in names[1:]]
+                elif model_extractor.exact_number_market(brand_name, category):
+                    # 型番の相場も同じ型番の売却済みだけで出す（レイバン: RB2140 に RB2140F を混ぜない、
+                    # グッチ時計: 「グッチ 1500L」の検索結果に混ざる 1400L・1900L を除く）
+                    name_filter = (lambda t, _m=model, _b=brand_name, _c=category:
+                                   model_extractor.extract(t, _b, _c) == _m)
                     filter_key = f"model:{model}"
 
                 model_market = analyzer.get_market_price(
@@ -391,25 +421,8 @@ def _scan_keywords(
                     required_words=effective_required,
                     title_filter=name_filter,
                     filter_key=filter_key,
+                    alt_keywords=alt_keywords,
                 )
-                # カタカナ名で売却実績が見つからない（3件未満）モデルは英字表記でも探し、
-                # 件数の多い方を採用する（例: デュベティカ「フェーベ」はタイトルの多くが FEBE 表記）
-                if name_filter is not None and (model_market is None or model_market.sample_count < 3):
-                    en = model_extractor.english_name(model)
-                    if en:
-                        en_market = analyzer.get_market_price(
-                            page,
-                            f"{brand_name} {en}",
-                            sample_count=settings["mercari_sold_sample_count"],
-                            cache_hours=settings["price_cache_hours"],
-                            exclude_words=exclude_words,
-                            required_words=effective_required,
-                            title_filter=name_filter,
-                            filter_key=filter_key,
-                        )
-                        if en_market and (model_market is None
-                                          or en_market.sample_count > model_market.sample_count):
-                            model_market = en_market
                 if model_market is None:
                     print(f"    [{model}] メルカリ相場なし → スキップ")
                     continue  # メルカリで型番確認できず → スキップ

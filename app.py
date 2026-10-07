@@ -81,17 +81,55 @@ def _norm(s: str) -> str:
 
 
 def _model_aliases() -> dict[str, list[str]]:
-    """model_extractor._MODEL_NAMES の「日本語名, 英字名」の並びから別名表を作る。
-    例: トリニティ → [トリニティ, TRINITY]
+    """モデル名 → 照合用の全表記（model_extractor.model_aliases）の表。
+    キーはカタカナ名・英字名・表記ゆれのどれでも引けるよう大文字で登録する。
+    例: トリニティ / TRINITY → [トリニティ, TRINITY]
     """
     aliases: dict[str, list[str]] = {}
-    for names in model_extractor._MODEL_NAMES.values():
-        for i, name in enumerate(names):
-            group = [name]
-            if not name.isascii() and i + 1 < len(names) and names[i + 1].isascii():
-                group.append(names[i + 1])
-            aliases.setdefault(name.upper(), group)
+    for brand, names in model_extractor._MODEL_NAMES.items():
+        for name in names:
+            forms = model_extractor.model_aliases(name, brand)
+            for f in [name] + forms:
+                aliases.setdefault(f.upper(), forms)
     return aliases
+
+
+def _number_categories(numbers: dict[str, list[str]]) -> dict[str, dict[str, str]]:
+    """ジャンルで型番の照合が変わるブランド（グッチ: 時計/サングラス）について、
+    型番の候補ごとにどのジャンルの型番かを返す（ブランド → {型番: ジャンル}）"""
+    known = getattr(model_extractor, "MODEL_NUMBER_CATEGORIES", {})
+    cfg_cats: dict[str, list[str]] = {}
+    for kw in _load_config()["keywords"]:
+        cfg_cats.setdefault(_brand_of(kw), [])
+        c = _cat(kw.get("category", "") or "その他")
+        if c not in cfg_cats[_brand_of(kw)]:
+            cfg_cats[_brand_of(kw)].append(c)
+    out: dict[str, dict[str, str]] = {}
+    for b, nums in numbers.items():
+        if not model_extractor.has_category_extractor(b):
+            continue
+        m: dict[str, str] = {}
+        for n in nums:
+            c = known.get(b, {}).get(n)
+            if c is None:
+                c = next((c for c in cfg_cats.get(b, []) if model_extractor.extract(n, b, c)), None)
+            if c:
+                m[n] = c
+        out[b] = m
+    return out
+
+
+def _number_fits(num: str, brand: str, cat: str) -> bool:
+    """型番がそのジャンルのキーワードで使えるか。ジャンル別の照合があるブランド（グッチ）だけ判定し、
+    それ以外のブランドは従来どおり常に True"""
+    if not model_extractor.has_category_extractor(brand):
+        return True
+    if model_extractor.extract(num, brand, cat) is not None:
+        return True
+    # どのジャンルの形式にも当てはまらない型番（自由入力の未登録型番など）は従来どおり全ジャンルで使う
+    others = {_cat(kw.get("category", "") or "その他") for kw in _load_config()["keywords"]
+              if _brand_of(kw) == brand} - {cat}
+    return not any(model_extractor.extract(num, brand, c) for c in others)
 
 
 def build_options() -> dict:
@@ -160,6 +198,17 @@ def build_options() -> dict:
         "brands": list(brands.values()),
         "models": models,
         "model_numbers": numbers,
+        # 型番の候補に添える愛称（ブランド → {型番: 愛称}）。例: RB2140 → ウェイファーラー
+        "model_number_labels": getattr(model_extractor, "MODEL_NUMBER_LABELS", {}),
+        # ジャンル専用の型番（ブランド → {型番: ジャンル}）。例: グッチ YA126402 → 時計。
+        # 画面では選択中のジャンルの型番だけを出す（グッチのサングラスだけ選んだときに時計の型番を出さない）
+        "model_number_categories": _number_categories(numbers),
+        # 英字名でも検索するモデル（ブランド → {カタカナ名: 英字名}）。画面の所要時間の目安に使う
+        "model_en": {
+            b: {m: n[1] for m in ms if not _has_digit(m)
+                for n in [model_extractor.search_names(m, b)] if len(n) > 1}
+            for b, ms in models.items()
+        },
         "sources": sources,
         "keywords": [
             {"name": kw["name"], "brand": _brand_of(kw), "category": _cat(kw.get("category", "") or "その他")}
@@ -204,9 +253,13 @@ def build_plan(req: dict, cfg: dict) -> list[tuple[dict, str | None]]:
     free_numbers = [t.strip() for t in re.split(r"[,、，\s]+", req.get("free_numbers") or "") if t.strip()]
     # 自由入力の型番は、型番の形式から判別できるブランド（例: 2531.80→オメガ）にだけ使う。
     # どのブランドの形式にも当てはまらなければ、選択中の全ブランドで検索する。
+    # ジャンルで型番の形式が変わるブランド（グッチ: 時計 YA126402 / サングラス GG0061S）は、
+    # 選択中のジャンルで判別する。
+    sel_pairs = {(_brand_of(kw), _cat(kw.get("category", "") or "その他")) for kw in cfg["keywords"]}
+    sel_pairs = {(b, c) for b, c in sel_pairs if b in brands and c in cats}
     free_for: dict[str, list[str]] = {}
     for num in free_numbers:
-        owners = [b for b in brands if model_extractor.extract(num, b)]
+        owners = {b for b, c in sel_pairs if model_extractor.extract(num, b, c)}
         for b in owners or brands:
             free_for.setdefault(b, []).append(num)
 
@@ -218,6 +271,8 @@ def build_plan(req: dict, cfg: dict) -> list[tuple[dict, str | None]]:
         if cat not in cats or brand not in brands:
             continue
         targets = picked.get(brand, []) + free_for.get(brand, [])
+        # グッチ等: 時計の型番はサングラスのキーワードでは使わない（逆も同じ）
+        targets = [m for m in targets if not _has_digit(m) or _number_fits(m, brand, cat)]
         if not targets:
             if kw["name"] not in seen:
                 seen.add(kw["name"])
@@ -230,8 +285,19 @@ def build_plan(req: dict, cfg: dict) -> list[tuple[dict, str | None]]:
                     plan.append((kw, None))
                 continue
             c = copy.deepcopy(kw)
-            # 型番はブランド名と組み合わせて検索、モデル名は元のキーワードに追加
-            c["name"] = f"{brand} {m}" if _has_digit(m) else f"{kw['name']} {m}"
+            # 型番はブランド名と組み合わせて1本で検索。モデル名は
+            #   カタカナ名: 元のキーワード + カタカナ名（例: デュベティカ ダウン ディオニシオ）
+            #   英字名:     ブランド名 + 英字名      （例: デュベティカ DIONISIO）
+            # の2本で検索する（英字だけのタイトルの出品も拾うため）。ラクマ・ヤフオクは
+            # デュベティカ/DUVETICA 等のブランド名を同一視して検索するので、英字側の
+            # ブランド名はカタカナのままでよく、ジャンル語（ダウン等）を付けない方が多く拾える。
+            if _has_digit(m):
+                c["name"] = f"{brand} {m}"
+            else:
+                names = model_extractor.search_names(m, brand)
+                c["name"] = f"{kw['name']} {names[0]}"
+                if len(names) > 1:
+                    c["search_queries"] = [c["name"]] + [f"{brand} {n}" for n in names[1:]]
             c["brand_name"] = brand
             if c["name"] not in seen:
                 seen.add(c["name"])
@@ -245,6 +311,9 @@ def _deal_matches_model(deal, model: str, aliases: dict[str, list[str]]) -> bool
     if deal.model and model_extractor.is_strict_brand(deal.brand):
         want = model_extractor.extract(model, deal.brand) or model
         return _norm(deal.model) == _norm(want)
+    if deal.model and (model_extractor.model_names(deal.model, deal.brand)[0]
+                       == model_extractor.model_names(model, deal.brand)[0]):
+        return True
     names = aliases.get(model.upper(), [model])
     hay_title = _norm(deal.item.title)
     hay_model = _norm(deal.model)
@@ -294,6 +363,7 @@ class _Job:
         self.conditions: dict = {}
         self.error = ""
         self.stop_requested = False
+        self.found_count = 0       # 実行中に見つかった案件候補の数（ログの「--> N 件の案件」を合算）
 
     def snapshot(self, with_results: bool) -> dict:
         with self.lock:
@@ -306,6 +376,7 @@ class _Job:
                 "finished_at": self.finished_at,
                 "logs": list(self.logs)[-60:],
                 "result_count": len(self.results),
+                "found_count": self.found_count,
                 "conditions": self.conditions,
                 "error": self.error,
             }
@@ -331,8 +402,11 @@ class _ThreadLogTee:
             while "\n" in self._buf:
                 line, self._buf = self._buf.split("\n", 1)
                 if line.strip():
+                    m = _FOUND_RE.search(line)
                     with JOB.lock:
                         JOB.logs.append(line)
+                        if m:
+                            JOB.found_count += int(m.group(1))
         return len(s)
 
     def flush(self):
@@ -343,6 +417,8 @@ class _ThreadLogTee:
 
 
 sys.stdout = _ThreadLogTee(sys.stdout)
+
+_FOUND_RE = re.compile(r"-->\s*(\d+)\s*件の案件")
 
 
 def _run_job(req: dict):
@@ -365,8 +441,10 @@ def _run_job(req: dict):
         if not plan:
             raise ValueError("条件に合うキーワードがありません（ジャンルとブランドを選んでください）")
 
+        n_queries = sum(len(kw.get("search_queries") or [kw["name"]]) for kw, _ in plan)
+        q_str = f"（検索語 {n_queries} 本）" if n_queries != len(plan) else ""
         print("=" * 50)
-        print(f"ローカル リサーチ開始: {len(plan)} キーワード / 仕入れ先 {','.join(sorted(sources))}")
+        print(f"ローカル リサーチ開始: {len(plan)} キーワード{q_str} / 仕入れ先 {','.join(sorted(sources))}")
         print("=" * 50)
 
         def item_filter(item) -> bool:
@@ -494,6 +572,7 @@ def api_research():
         JOB.results = []
         JOB.error = ""
         JOB.stop_requested = False
+        JOB.found_count = 0
         JOB.conditions = req
         JOB.started_at = datetime.now().isoformat(timespec="seconds")
         JOB.finished_at = None
