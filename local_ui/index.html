@@ -3,147 +3,224 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>仕入れリサーチ（ローカル）</title>
-  <link rel="stylesheet" href="/assets/style.css">
+  <meta name="color-scheme" content="light dark">
+  <title>仕入れリサーチ</title>
   <link rel="stylesheet" href="/ui/research.css">
 </head>
 <body>
-<header>
-  <h1>仕入れリサーチ（ローカル）</h1>
-  <p>条件をチェックして「リサーチ開始」。結果はこの画面にだけ表示されます（公開ダッシュボードには反映されません）</p>
+<header class="app-header">
+  <div class="header-inner">
+    <div class="brand-mark" aria-hidden="true">¥</div>
+    <div class="header-text">
+      <h1>仕入れリサーチ</h1>
+      <p>この画面の結果はこのMacの中だけに表示されます（公開ダッシュボードには反映されません）</p>
+    </div>
+    <nav class="header-nav">
+      <button type="button" class="nav-btn" id="navSetup" onclick="showSetup()">条件を選ぶ</button>
+      <button type="button" class="nav-btn" id="navResults" onclick="showResultsView()" hidden>結果を見る</button>
+      <button type="button" class="nav-btn nav-running" id="navProgress" onclick="showView('progress')" hidden>調査中…</button>
+    </nav>
+  </div>
 </header>
 
 <main class="wrap">
-  <section class="panel" id="conditionPanel">
-    <div class="panel-head">
-      <h2>リサーチ条件</h2>
-      <div class="head-btns">
-        <button type="button" class="mini-btn" onclick="selectAll(true)">すべて選択</button>
-        <button type="button" class="mini-btn" onclick="selectAll(false)">すべて解除</button>
-      </div>
-    </div>
+  <!-- ───────── 条件選択（ステップ式） ───────── -->
+  <section id="setupView" class="view">
+    <ol class="stepper" id="stepper">
+      <li class="stp" data-step="1"><button type="button" onclick="goStep(1)"><span class="dot">1</span><span class="stp-label">ジャンル</span></button></li>
+      <li class="stp-line" aria-hidden="true"></li>
+      <li class="stp" data-step="2"><button type="button" onclick="goStep(2)"><span class="dot">2</span><span class="stp-label">ブランド</span></button></li>
+      <li class="stp-line" aria-hidden="true"></li>
+      <li class="stp" data-step="3"><button type="button" onclick="goStep(3)"><span class="dot">3</span><span class="stp-label">モデル・型番</span></button></li>
+      <li class="stp-line" aria-hidden="true"></li>
+      <li class="stp" data-step="4"><button type="button" onclick="goStep(4)"><span class="dot">4</span><span class="stp-label">条件・仕入れ先</span></button></li>
+    </ol>
+    <div class="step-count" id="stepCount">ステップ 1 / 4</div>
 
-    <div class="group">
-      <div class="group-head">
-        <h3>ジャンル</h3>
-        <span class="group-btns">
-          <button type="button" class="link-btn" onclick="toggleGroup('categories', true)">すべて選択</button>
-          <button type="button" class="link-btn" onclick="toggleGroup('categories', false)">解除</button>
-        </span>
-      </div>
-      <div class="checks" id="categoryChecks"></div>
-    </div>
+    <div class="selbar" id="selBar"></div>
 
-    <div class="group">
-      <div class="group-head">
-        <h3>ブランド <small>（選んだジャンルのブランドだけ表示）</small></h3>
-        <span class="group-btns">
-          <button type="button" class="link-btn" onclick="toggleGroup('brands', true)">すべて選択</button>
-          <button type="button" class="link-btn" onclick="toggleGroup('brands', false)">解除</button>
-        </span>
-      </div>
-      <div id="brandChecks"></div>
-    </div>
+    <div class="last-banner" id="lastBanner" hidden></div>
 
-    <div class="group">
-      <div class="group-head">
-        <h3>モデル名 <small>（任意。選ぶとそのモデルで個別に検索して絞り込みます）</small></h3>
-        <span class="group-btns">
-          <button type="button" class="link-btn" onclick="toggleGroup('models', false)">解除</button>
-        </span>
+    <!-- ステップ1 -->
+    <section class="step" data-step="1">
+      <div class="step-head">
+        <h2>どのジャンルを調べますか？</h2>
+        <p>いくつでも選べます。カードをタップすると選択／解除できます。</p>
       </div>
-      <div id="modelChecks"></div>
-    </div>
+      <div class="toolbar">
+        <button type="button" class="ghost-btn" onclick="toggleGroup('categories', true)">すべて選択</button>
+        <button type="button" class="ghost-btn" onclick="toggleGroup('categories', false)">すべて解除</button>
+      </div>
+      <div class="genre-grid" id="genreGrid"></div>
+    </section>
 
-    <div class="group">
-      <div class="group-head">
-        <h3>型番 <small>（任意）</small></h3>
-        <span class="group-btns">
-          <button type="button" class="link-btn" onclick="toggleGroup('model_numbers', false)">解除</button>
-        </span>
+    <!-- ステップ2 -->
+    <section class="step" data-step="2" hidden>
+      <div class="step-head">
+        <h2>どのブランドを調べますか？</h2>
+        <p>選んだジャンルのブランドだけを表示しています。</p>
       </div>
-      <input type="text" id="freeNumbers" class="text-in" placeholder="型番を入力（カンマ区切り） 例: 2531.80, RB3025">
-      <div class="hint">入力した型番は、型番の形から分かるブランドで検索します（分からない場合は選択中の全ブランドで検索）</div>
-      <div id="numberChecks"></div>
-    </div>
+      <div class="toolbar">
+        <button type="button" class="ghost-btn" onclick="toggleGroup('brands', true)">すべて選択</button>
+        <button type="button" class="ghost-btn" onclick="toggleGroup('brands', false)">すべて解除</button>
+        <span class="toolbar-note" id="brandCountNote"></span>
+      </div>
+      <div id="brandGroups"></div>
+    </section>
 
-    <div class="row-groups">
-      <div class="group">
-        <h3>利益の条件</h3>
-        <label class="num-row">最低利益額 <input type="number" id="minProfit" min="0" step="500"> 円</label>
-        <label class="num-row">最低利益率 <input type="number" id="minRoi" min="0" step="5"> %</label>
+    <!-- ステップ3 -->
+    <section class="step" data-step="3" hidden>
+      <div class="step-head">
+        <h2>モデル名・型番で絞りますか？ <span class="optional">任意</span></h2>
+        <p>選ばなくても大丈夫です。<strong>何も選ばずに「次へ」で、ブランド全体を調べます。</strong>選ぶと、そのモデル・型番で個別に検索して絞り込みます。</p>
       </div>
-      <div class="group">
-        <h3>オークション残り時間 <small>（ヤフオクの入札形式のみ）</small></h3>
-        <label class="num-row">終了まで
-          <select id="auctionHours">
-            <option value="">指定なし</option>
-            <option value="1">1時間以内</option>
-            <option value="3">3時間以内</option>
-            <option value="6">6時間以内</option>
-            <option value="12">12時間以内</option>
-            <option value="24">24時間以内</option>
-            <option value="48">2日以内</option>
-            <option value="72">3日以内</option>
-            <option value="168">7日以内</option>
-          </select>
-        </label>
-        <label class="check-line"><input type="checkbox" id="auctionOnly"> オークション形式の商品だけにする</label>
-        <div class="hint">即決・定額・フリマ形式の商品は残り時間の条件の対象外です（チェックを入れると除外）</div>
+      <div class="free-box">
+        <label for="freeNumbers" class="field-label">型番を直接入力（カンマ区切り）</label>
+        <input type="text" id="freeNumbers" class="text-in" placeholder="例: 2531.80, RB3025" autocomplete="off">
+        <div class="hint">入力した型番は、型番の形から分かるブランドで検索します（分からない場合は選択中の全ブランドで検索）</div>
       </div>
-      <div class="group">
-        <h3>取得件数</h3>
-        <label class="num-row">仕入れ先ごと・1キーワードあたり <input type="number" id="perSource" min="1" max="100"> 件</label>
-        <div class="hint" id="perSourceHint"></div>
+      <div class="toolbar">
+        <button type="button" class="ghost-btn" onclick="setAllDetails(true)">すべて開く</button>
+        <button type="button" class="ghost-btn" onclick="setAllDetails(false)">すべて閉じる</button>
+        <button type="button" class="ghost-btn" onclick="clearModels()">モデル・型番の選択をすべて解除</button>
       </div>
-    </div>
+      <div id="modelGroups"></div>
+    </section>
 
-    <div class="group">
-      <div class="group-head">
+    <!-- ステップ4 -->
+    <section class="step" data-step="4" hidden>
+      <div class="step-head">
+        <h2>利益の条件と仕入れ先を決めましょう</h2>
+        <p>迷ったら、そのままで大丈夫です。仕入れ先だけは1つ以上選んでください。</p>
+      </div>
+
+      <div class="cond-grid">
+        <div class="cond-card">
+          <h3>最低利益額</h3>
+          <div class="slider-row">
+            <input type="range" id="minProfitRange" min="0" max="30000" step="500" aria-label="最低利益額">
+            <div class="num-box"><input type="number" id="minProfit" min="0" step="500" inputmode="numeric"><span>円</span></div>
+          </div>
+          <div class="hint">この金額以上の利益が見込める商品だけを表示します</div>
+        </div>
+        <div class="cond-card">
+          <h3>最低利益率</h3>
+          <div class="slider-row">
+            <input type="range" id="minRoiRange" min="0" max="200" step="5" aria-label="最低利益率">
+            <div class="num-box"><input type="number" id="minRoi" min="0" step="5" inputmode="numeric"><span>%</span></div>
+          </div>
+          <div class="hint">0% にすると利益率では絞り込みません</div>
+        </div>
+        <div class="cond-card">
+          <h3>オークション残り時間 <small>ヤフオクの入札形式のみ</small></h3>
+          <div class="seg" id="hoursSeg"></div>
+          <label class="switch-line"><input type="checkbox" id="auctionOnly"> <span>オークション形式の商品だけにする</span></label>
+          <div class="hint">即決・定額・フリマ形式の商品は残り時間の条件の対象外です（上のチェックを入れると除外）</div>
+        </div>
+        <div class="cond-card">
+          <h3>取得件数 <small>仕入れ先ごと・1キーワードあたり</small></h3>
+          <div class="seg seg-presets" id="perSourceSeg"></div>
+          <div class="eta" id="etaLine"></div>
+        </div>
+      </div>
+
+      <div class="sub-head">
         <h3>仕入れ先</h3>
-        <span class="group-btns">
-          <button type="button" class="link-btn" onclick="toggleGroup('sources', true)">すべて選択</button>
-          <button type="button" class="link-btn" onclick="toggleGroup('sources', false)">解除</button>
+        <span class="toolbar">
+          <button type="button" class="ghost-btn" onclick="toggleGroup('sources', true)">すべて選択</button>
+          <button type="button" class="ghost-btn" onclick="toggleGroup('sources', false)">すべて解除</button>
         </span>
       </div>
-      <div class="checks" id="sourceChecks"></div>
-    </div>
+      <div class="source-grid" id="sourceGrid"></div>
 
-    <div class="start-bar">
-      <div class="plan-line" id="planLine"></div>
-      <button type="button" class="start-btn" id="startBtn" onclick="startResearch()">リサーチ開始</button>
-    </div>
-    <div class="error-line" id="errorLine"></div>
+      <div class="final-box">
+        <h3>この内容でリサーチします</h3>
+        <dl class="final-summary" id="finalSummary"></dl>
+        <div class="final-line" id="finalLine"></div>
+        <button type="button" class="start-btn" id="startBtn" onclick="startResearch()">🔍 リサーチ開始</button>
+        <div class="error-line" id="errorLine" role="alert"></div>
+      </div>
+    </section>
+
+    <nav class="step-nav">
+      <button type="button" class="nav-back" id="backBtn" onclick="goStep(currentStep - 1)">← 戻る</button>
+      <div class="nav-reason" id="navReason" role="status"></div>
+      <button type="button" class="nav-next" id="nextBtn" onclick="goStep(currentStep + 1)">次へ →</button>
+    </nav>
   </section>
 
-  <section class="panel" id="progressPanel" hidden>
-    <div class="panel-head">
-      <h2 id="progressTitle">リサーチ中...</h2>
-      <button type="button" class="mini-btn" id="stopBtn" onclick="stopResearch()">中止</button>
+  <!-- ───────── 調査中 ───────── -->
+  <section id="progressView" class="view" hidden>
+    <div class="progress-card">
+      <div class="progress-top">
+        <div>
+          <div class="progress-state" id="progressTitle">リサーチ中…</div>
+          <div class="progress-cond" id="progressCond"></div>
+        </div>
+        <button type="button" class="stop-btn" id="stopBtn" onclick="stopResearch()">■ 中止</button>
+      </div>
+
+      <div class="now-box">
+        <div class="now-label">いま調べているブランド</div>
+        <div class="now-brand" id="nowBrand">準備中…</div>
+        <div class="now-keyword" id="nowKeyword"></div>
+      </div>
+
+      <div class="big-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" id="bigBar"><div class="big-bar-fill" id="barFill"></div></div>
+      <div class="bar-caption"><span id="kwCount">0 / 0 キーワード</span><span id="pctText">0%</span></div>
+
+      <div class="stat-row">
+        <div class="stat"><div class="stat-label">経過時間</div><div class="stat-value" id="elapsedText">0分0秒</div></div>
+        <div class="stat"><div class="stat-label">残りの目安</div><div class="stat-value" id="remainText">計算中…</div></div>
+        <div class="stat stat-found"><div class="stat-label">見つかった候補</div><div class="stat-value" id="foundText">0件</div></div>
+      </div>
+      <div class="hint center" id="progressNote">候補の数は途中経過です。最後に条件（モデル・利益率・重複）で絞り込んだ件数が結果になります。</div>
+      <div class="progress-actions" id="progressActions" hidden>
+        <button type="button" class="primary-btn" onclick="showResultsView()">結果を見る</button>
+        <button type="button" class="ghost-btn" onclick="goStep(4, true)">条件を変えて再検索</button>
+      </div>
+
+      <details class="log-box">
+        <summary>処理ログを見る（詳しい人向け）</summary>
+        <pre class="log" id="logBox"></pre>
+      </details>
     </div>
-    <div class="bar"><div class="bar-fill" id="barFill"></div></div>
-    <div class="progress-text" id="progressText"></div>
-    <details>
-      <summary>処理ログ</summary>
-      <pre class="log" id="logBox"></pre>
-    </details>
   </section>
 
-  <section class="panel" id="resultPanel" hidden>
-    <div class="panel-head">
-      <h2>結果</h2>
-      <div class="sort-tabs">
-        <button class="sort-btn active" data-sort="profit" onclick="setSort('profit', this)">利益額順</button>
-        <button class="sort-btn" data-sort="roi" onclick="setSort('roi', this)">利益率順</button>
-        <button class="sort-btn" data-sort="remain" onclick="setSort('remain', this)">残り時間が短い順</button>
+  <!-- ───────── 結果 ───────── -->
+  <section id="resultView" class="view" hidden>
+    <div class="result-head">
+      <div>
+        <h2>リサーチ結果</h2>
+        <div class="result-meta" id="resultMeta"></div>
+      </div>
+      <div class="result-head-btns">
+        <button type="button" class="primary-btn" onclick="goStep(4, true)">条件を変えて再検索</button>
+        <button type="button" class="ghost-btn" onclick="goStep(1, true)">最初から選び直す</button>
       </div>
     </div>
+
+    <div class="summary-tiles" id="summaryTiles"></div>
+
+    <div class="filter-panel">
+      <div class="filter-row">
+        <span class="filter-label">並べ替え</span>
+        <div class="seg" id="sortSeg">
+          <button type="button" data-sort="profit" class="on">利益額</button>
+          <button type="button" data-sort="roi">利益率</button>
+          <button type="button" data-sort="remain">残り時間</button>
+        </div>
+      </div>
+      <div class="filter-row"><span class="filter-label">仕入れ先</span><div class="chips" id="sourceFilter"></div></div>
+      <div class="filter-row"><span class="filter-label">ジャンル</span><div class="chips" id="genreFilter"></div></div>
+    </div>
+
     <div class="count-line" id="countLine"></div>
-    <div id="cardsContainer"></div>
+    <div class="card-grid" id="cardsContainer"></div>
   </section>
 </main>
 
-<footer>app.py · ローカル専用（127.0.0.1）</footer>
+<footer class="app-footer">ローカル専用（このMacの中だけで動いています）</footer>
 <script src="/ui/research.js"></script>
 </body>
 </html>
