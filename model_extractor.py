@@ -50,7 +50,8 @@ _PATTERNS: dict[str, list[str]] = {
         r'\bGG\s?\d{4}[A-Z]?\b',
     ],
     "セリーヌ": [
-        r'\bCL\s?\d{5}[A-Z]?\b',        # CL40046U
+        # CL40046U。ジャンルが「サングラス」のときは _extract_celine_sunglasses で照合する（_CATEGORY_EXTRACTORS）
+        r'\bCL\s?\d{5}[A-Z]?\b',
     ],
     "プラダ": [
         r'\bSPR\s?\d{2}[A-Z]\b',        # SPR17W, SPR06W
@@ -571,17 +572,101 @@ def _extract_gucci_sunglasses(title: str) -> str | None:
         return "GG" + m.group(1).upper()
     return None
 
+# ── セリーヌのサングラス: 仕入れ対象の代表型番と愛称（メルカリ売却済みで相場が付くもの。2026-10 確認）──
+# 型番の形式（メルカリの表記ゆれ: CL40194U / CL 40194U / cl40194u / CL-40194U / CL40194U 01A /
+# CL40269U01A のようにカラー番号が続くもの）:
+#   現行品: CL + 5桁 + U/I/F（CL40194U・CL40233I・CL40061F）。末尾の1文字は別型番として扱う
+#           （レイバンの F 付きと同じ扱い。F=アジアンフィット）。「CL402321」のように I を 1 と書いた表記は、
+#           代表型番に CL40232I があるときだけ I として扱う
+#           4桁 + 2文字の旧い現行品（CL4002UN・CL4003IN）も同じ扱い
+#   CL50xxx（CL50049I 等）はメガネ（光学フレーム）の型番なので、サングラスでは型番として扱わない
+#   旧型:   CL 41xxx/S・CL41061/F/S（フィービー期）。/S・/F/S 等の版違いは流通が少なく相場差もはっきりしないため、
+#           CL + 5桁（CL41373）にまとめる
+# 並びは画面の表示順（メルカリ相場の中央値が高い順）
+_CELINE_SUN_MODELS: dict[str, str] = {}   # 型番 → 愛称（無いものは空文字）。下で設定
+_CELINE_SUN_MODELS.update({
+    "CL40238U": "",
+    "CL40282U": "トリオンフ",
+    "CL40249U": "",
+    "CL40193I": "",
+    "CL40248I": "",
+    "CL40061F": "",
+    "CL40194U": "トリオンフ",
+    "CL40057F": "",
+    "CL40197U": "",
+    "CL40253F": "",
+    "CL4002UN": "",
+    "CL40233I": "",
+    "CL40034F": "ボストン",
+    "CL41031": "フィービー期",
+    "CL40232I": "",
+    "CL4003IN": "",
+    "CL41394": "フィービー期",
+    "CL40100U": "",
+    "CL41090": "フィービー期",
+    "CL41061": "フィービー期",
+    "CL40011U": "",
+    "CL41755": "キャットアイ・フィービー期",
+    "CL41440": "フィービー期",
+    "CL41732": "フィービー期",
+})
+
+_CELINE_SUN_RE = re.compile(
+    r'(?<![A-Za-z0-9])CL[\s\-]?(?:'
+    # 5桁: 「CL402321」（I を 1 と書いた表記）、または旧型の「/S」「/F/S」・現行品の末尾 U/I/F
+    # （カラー番号 01A 等が続いてもよい）
+    r'(\d{5})(?:(1)(?![0-9A-Za-z])|(?!\d)((?:\s?/\s?[A-Z]{1,2}(?![A-Za-z]))*)(?:([A-Z])(?![A-Za-z]))?)'
+    # 4桁 + 2文字（CL4002UN）
+    r'|(\d{4})([UIF][A-Z])(?![A-Za-z])'
+    r')',
+    re.IGNORECASE)
+_CELINE_SUN_BY_NUM: dict[str, list[str]] = {}
+for _m in _CELINE_SUN_MODELS:
+    _CELINE_SUN_BY_NUM.setdefault(re.match(r'CL(\d+)', _m).group(1), []).append(_m)
+# 「CL」が付かない数字だけの表記（40194U）は、現行品の代表型番に限り、末尾の文字まで書かれているときだけ拾う
+_CELINE_SUN_BARE_RE = re.compile(
+    r'(?<![A-Za-z0-9.,¥￥\-/])('
+    + "|".join(sorted((m[2:] for m in _CELINE_SUN_MODELS if m[-1].isalpha()), key=len, reverse=True))
+    + r')(?![A-Za-z0-9])',
+    re.IGNORECASE)
+
+
+def _extract_celine_sunglasses(title: str) -> str | None:
+    """セリーヌのサングラスの型番（CL40194U / CL4002UN / 旧型 CL41373）"""
+    t = unicodedata.normalize("NFKC", title or "")
+    for m in _CELINE_SUN_RE.finditer(t):
+        if m.group(5):                               # CL4002UN
+            return "CL" + m.group(5) + m.group(6).upper()
+        num, one, slash, suf = m.group(1), m.group(2), m.group(3), (m.group(4) or "").upper()
+        if num[0] == "5":
+            continue                                  # CL50xxx はメガネ（光学フレーム）の型番
+        cands = _CELINE_SUN_BY_NUM.get(num, [])
+        if slash or cands == ["CL" + num]:
+            return "CL" + num                         # 旧型（CL41373/S）は5桁にまとめる
+        if one:                                       # CL402321 → CL40232I（代表型番にあるときだけ）
+            return "CL" + num + "I" if "CL" + num + "I" in cands else None
+        if not suf and len(cands) == 1:
+            return cands[0]                           # 末尾なし（CL40194）: 版違いが1つだけの代表型番に寄せる
+        return "CL" + num + suf
+    m = _CELINE_SUN_BARE_RE.search(t)
+    if m:
+        return "CL" + m.group(1).upper()
+    return None
+
+
 # ジャンル別に型番の照合を切り替えるブランド: (ブランド, ジャンル) → 抽出関数。
 # ここに無い組み合わせは従来どおり _PATTERNS[ブランド] で照合する
 _CATEGORY_EXTRACTORS = {
     ("グッチ", "時計"): _extract_gucci_watch,
     ("グッチ", "サングラス"): _extract_gucci_sunglasses,
+    ("セリーヌ", "サングラス"): _extract_celine_sunglasses,
 }
 
 # 画面の「型番」候補に添える愛称（ブランド → {型番: 愛称}）。例: RB2140 → ウェイファーラー
 MODEL_NUMBER_LABELS: dict[str, dict[str, str]] = {
     "レイバン": {k: v for k, v in _RAYBAN_MODELS.items() if v},
     "グッチ": {k: v for k, v in {**_GUCCI_WATCH_MODELS, **_GUCCI_SUN_MODELS}.items() if v},
+    "セリーヌ": {k: v for k, v in _CELINE_SUN_MODELS.items() if v},
 }
 
 # 画面の「型番」候補に最初から出す代表的な型番（メルカリ売却実績の多いもの。2026-10 確認）
@@ -596,12 +681,14 @@ KNOWN_MODEL_NUMBERS: dict[str, list[str]] = {
     ],
     # グッチは時計とサングラスの型番（画面では選択中のジャンルの型番だけを出す。MODEL_NUMBER_CATEGORIES）
     "グッチ": list(_GUCCI_WATCH_MODELS) + list(_GUCCI_SUN_MODELS),
+    "セリーヌ": list(_CELINE_SUN_MODELS),
 }
 
 # 型番の候補のうち、特定のジャンル専用のもの（ブランド → {型番: ジャンル}）。
 # 画面では選択中のジャンルの型番だけを出し、リサーチでもそのジャンルのキーワードにだけ使う
 MODEL_NUMBER_CATEGORIES: dict[str, dict[str, str]] = {
     "グッチ": {**{m: "時計" for m in _GUCCI_WATCH_MODELS}, **{m: "サングラス" for m in _GUCCI_SUN_MODELS}},
+    "セリーヌ": {m: "サングラス" for m in _CELINE_SUN_MODELS},
 }
 
 # ── ブランド名の表記ゆれ（他ブランド混入チェック用） ──────────────────────
@@ -775,7 +862,8 @@ def extract_name(title: str, brand: str) -> str | None:
 # 混ざるため、型番ごとに分けて相場を出す。
 # グッチ時計も同様（「グッチ 1500L」で検索すると 1400L・1900L 等も混ざる）。
 # グッチのサングラスも同様（「グッチ GG0022S」で検索すると GG0022SA も混ざる）。
-_EXACT_NUMBER_BRANDS = {"レイバン", ("グッチ", "時計"), ("グッチ", "サングラス")}
+# セリーヌのサングラスも同様（「セリーヌ CL40034F」で検索すると CL4003IN も混ざる）。
+_EXACT_NUMBER_BRANDS = {"レイバン", ("グッチ", "時計"), ("グッチ", "サングラス"), ("セリーヌ", "サングラス")}
 
 
 def exact_number_market(brand: str, category: str = "") -> bool:
@@ -783,7 +871,7 @@ def exact_number_market(brand: str, category: str = "") -> bool:
 
 
 def has_category_extractor(brand: str) -> bool:
-    """ジャンルによって型番の照合が変わるブランドか（グッチ: 時計とサングラス）"""
+    """ジャンルによって型番の照合が変わるブランドか（グッチ: 時計とサングラス、セリーヌ: サングラス）"""
     return any(b == brand for b, _c in _CATEGORY_EXTRACTORS)
 
 
