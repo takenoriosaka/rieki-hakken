@@ -46,7 +46,7 @@ RESULT_DIR = os.path.join(BASE_DIR, "local_results")
 LAST_RESULT_PATH = os.path.join(RESULT_DIR, "last_result.json")
 
 # 「オメガ シーマスター」の2語目がモデル名かどうか判定するときに除外する一般名詞
-_GENERIC_WORDS = {"時計", "腕時計", "ダウン", "サングラス", "ジュエリー", "アクセサリー", "スカーフ", "バッグ", "財布"}
+_GENERIC_WORDS = {"時計", "腕時計", "ダウン", "ダウンコート", "サングラス", "ジュエリー", "アクセサリー", "スカーフ", "バッグ", "財布"}
 
 # 旧ジャンル名 → 現在のジャンル名（保存済みの選択・過去の結果に旧名が残っていても動くように）
 _CATEGORY_RENAMES = {"ジュエリー": "アクセサリー"}

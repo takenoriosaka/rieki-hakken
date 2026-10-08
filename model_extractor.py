@@ -228,6 +228,12 @@ _STRICT_MODELS: dict[str, list[tuple[str, list[str]]]] = {
         ("バロー",               [r'(?<![ァ-ヶー])バロー(?![ァ-ヶ])', _A + r'BARROW' + _Z]),
         ("カンヌ",               [r'(?<![ァ-ヶー])カンヌ', _A + r'CANNES' + _Z]),
     ],
+    "ヘルノ": [
+        # 型番（PI064UL 等）はメルカリ売却済みのタイトルにほとんど載らない（6%）ためモデル名で照合する。
+        # 対象はラミナーのダウンコートだけ（コートの種別条件は _TITLE_RULES）。
+        # 表記ゆれ: ラミナー / ラミナ / ラミーナ / LAMINAR（「ラミナリア」等の別語は除く）
+        ("ラミナー",             [r'ラミー?ナ(?:ー|(?![ァ-ヶ]))', _A + r'LAMINAR' + _Z]),
+    ],
     "ノースフェイス": [
         ("ショートヌプシ",         [r'ショート\s*ヌプシ', _A + r'SHORT\s*NUPTSE' + _Z]),
         ("ヌプシベスト",           [r'ヌプシ\s*(?:ダウン\s*)?ベスト', _A + r'NUPTSE\s*(?:DOWN\s*)?VEST' + _Z]),
@@ -273,6 +279,7 @@ _STRICT_EN = {
     "スプートニック": "SPOUTNIC", "グルノーブルファー": "GRENOBLE FUR", "グルノーブル": "GRENOBLE",
     "アヌシー": "ANNECY", "ボルドー": "BORDEAUX", "ベルフォール": "BELFORT", "オーセンティック": "AUTHENTIC",
     "ランス": "REIMS", "コクーン": "COCOON", "バロー": "BARROW", "カンヌ": "CANNES",
+    "ラミナー": "LAMINAR",
 }
 for _brand, _models in _STRICT_MODELS.items():
     _MODEL_NAMES[_brand] = [x for _name, _ in _models for x in (_name, _STRICT_EN[_name])]
@@ -281,6 +288,47 @@ _STRICT_COMPILED = {
     b: [(name, [re.compile(p, re.IGNORECASE) for p in pats]) for name, pats in models]
     for b, models in _STRICT_MODELS.items()
 }
+
+
+# ── 厳密照合ブランドのうち、商品の種別もタイトルで絞るもの ───────────────────
+# ヘルノは「ラミナーのダウンコート」だけを対象にする（メルカリ売却済みの調査 2026-10）:
+#   ラミナー + ダウン + コート       18件 中央値 ¥39,400  IQR/中央値 0.40（最も安定）
+#   ラミナー + ダウン + ジャケット等 22件 中央値 ¥42,800  IQR/中央値 0.88（ばらつきが大きい）
+#   ラミナー + コート（ダウンなし）  16件 中央値 ¥22,290  ← ゴアテックスのシェルだけのコートが中心
+# そのため「ダウン/DOWN」と「コート/COAT」の両方を必須にする（ダウンなしのゴアテックスコート、
+# ダウンジャケット・ダウンベストは対象外）。ベスト・ジレと子供服（8A・130 等のサイズ表記）は除外する。
+# 照合はタイトルだけで行う（説明文の「コートの下に…」等で誤って採用しないため。uses_description 参照）
+def _herno_rule(title: str) -> bool:
+    t = unicodedata.normalize("NFKC", title or "").upper()
+    if not re.search(r'ダウン|(?<![A-Z])DOWN(?![A-Z])', t):
+        return False
+    if not re.search(r'コート|(?<![A-Z])COAT(?![A-Z])', t):
+        return False
+    if re.search(r'ベスト|ジレ|(?<![A-Z])(?:VEST|GILET)(?![A-Z])', t):
+        return False
+    # 子供服: キッズ等の語、8A・10A・14A（イタリアの子供服サイズ）、110〜160（cm）
+    if re.search(r'キッズ|KIDS|子供|子ども|こども|ジュニア|JUNIOR|ベビー|BABY|ガールズ|ボーイズ'
+                 r'|(?<![0-9A-Z.\-])(?:[2-9]|1[0-6])A(?![A-Z])'
+                 r'|(?<![0-9.,¥￥\-])1[1-6]0\s*(?:CM|センチ)?(?![0-9.,%万円])', t):
+        return False
+    return True
+
+
+_TITLE_RULES = {
+    "ヘルノ": _herno_rule,
+}
+# 種別条件のあるブランドで、モデル名そのもの（「ラミナー」「LAMINAR」）が渡されたときは
+# 条件なしで正規名を返す（main.py が extract_name(model) で正規名かどうかを確かめるため）
+_STRICT_NAME_KEYS = {
+    b: {_k: name for name, _ in _STRICT_MODELS[b] for _k in (name, _STRICT_EN[name])}
+    for b in _TITLE_RULES
+}
+
+
+def uses_description(brand: str) -> bool:
+    """タイトルで型番・モデル名が取れなかった出品に、商品説明文での照合を使うか。
+    種別までタイトルで絞るブランド（ヘルノ）は使わない"""
+    return brand not in _TITLE_RULES
 
 # レイバンの代表型番（型番 → 愛称）。並びは画面の表示順（相場の高さ・売却件数の多い順）
 _RAYBAN_MODELS.update({
@@ -483,7 +531,14 @@ BRAND_ALIASES: dict[str, list[str]] = {
     "ロエベ": ["ロエベ", "LOEWE"],
     "ミュウミュウ": ["ミュウミュウ", "MIUMIU", "MIU MIU"],
     "バレンシアガ": ["バレンシアガ", "BALENCIAGA"],
+    # HERNO は「Chernobyl」等に部分一致するため、前後に英字が続かないときだけ一致とする（_WORD_ALIASES）
+    "ヘルノ": ["ヘルノ", "HERNO"],
 }
+
+# 前後に英字が続かないときだけ一致とする表記（単語境界付きで照合する）。ここに無い表記は従来どおり部分一致
+_WORD_ALIASES = {"HERNO"}
+_WORD_ALIAS_RE = {a: re.compile(r'(?<![A-Za-z])' + re.escape(a) + r'(?![A-Za-z])', re.IGNORECASE)
+                  for a in _WORD_ALIASES}
 
 
 def brand_aliases(brand: str) -> list[str]:
@@ -494,7 +549,13 @@ def brand_aliases(brand: str) -> list[str]:
 def has_brand(title: str, brand: str) -> bool:
     """タイトルにブランド名（いずれかの表記）が含まれるか。大文字小文字は区別しない"""
     t = (title or "").lower()
-    return any(a.lower() in t for a in brand_aliases(brand))
+    for a in brand_aliases(brand):
+        if a in _WORD_ALIAS_RE:
+            if _WORD_ALIAS_RE[a].search(title or ""):
+                return True
+        elif a.lower() in t:
+            return True
+    return False
 
 
 # ── モデル名のカタカナ/英字表記（照合・仕入れ先検索・メルカリ相場で共用） ─────────
@@ -582,6 +643,14 @@ def search_names(model: str, brand: str = "") -> list[str]:
 def extract_name(title: str, brand: str) -> str | None:
     """モデル名だけを照合して返す（型番は見ない）。どの表記で見つかっても正規名（カタカナ）を返す"""
     if brand in _STRICT_COMPILED:
+        rule = _TITLE_RULES.get(brand)
+        if rule is not None:
+            key = _n(title)
+            for k, name in _STRICT_NAME_KEYS[brand].items():
+                if key == _n(k):
+                    return name
+            if not rule(title):
+                return None
         for name, pats in _STRICT_COMPILED[brand]:
             if any(p.search(title or "") for p in pats):
                 return name

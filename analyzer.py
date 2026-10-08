@@ -43,6 +43,34 @@ def get_market_price(
     title_filter=None,
     filter_key: str = "",
     alt_keywords: list[str] | None = None,
+    min_samples: int = 1,
+) -> Optional[MarketPrice]:
+    """メルカリ相場を取得し、売却済みが min_samples 件未満なら相場なし（None）とする。
+    引数は _get_market_price を参照。"""
+    market = _get_market_price(
+        page, keyword, sample_count=sample_count, cache_hours=cache_hours,
+        exclude_words=exclude_words, required_words=required_words,
+        price_min=price_min, price_max=price_max, title_filter=title_filter,
+        filter_key=filter_key, alt_keywords=alt_keywords,
+    )
+    if market is not None and market.sample_count < min_samples:
+        print(f"  [スキップ] {keyword}: 売却済み {market.sample_count}件 < {min_samples}件 → 相場なし")
+        return None
+    return market
+
+
+def _get_market_price(
+    page,
+    keyword: str,
+    sample_count: int = 30,
+    cache_hours: int = 12,
+    exclude_words: list[str] | None = None,
+    required_words: list[str] | None = None,
+    price_min: int | None = None,
+    price_max: int | None = None,
+    title_filter=None,
+    filter_key: str = "",
+    alt_keywords: list[str] | None = None,
 ) -> Optional[MarketPrice]:
     """メルカリ相場を取得（キャッシュ優先）。price_min/price_max で価格帯を限定できる。
     required_words: 同名称が別カテゴリーにも存在する場合の混入防止

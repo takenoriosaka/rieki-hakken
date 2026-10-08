@@ -454,6 +454,49 @@
       "category": "ダウン"
     },
     {
+      "name": "ヘルノ ラミナー ダウンコート",
+      "search_queries": [
+        "ヘルノ ラミナー ダウンコート",
+        "ヘルノ LAMINAR ダウンコート"
+      ],
+      "max_buy_price": 40000,
+      "min_buy_price": 100,
+      "exclude_words": [
+        "保存袋のみ",
+        "空箱",
+        "カタログ",
+        "ワッペン",
+        "バッジ",
+        "ノベルティ",
+        "付録",
+        "Oggi",
+        "ハンガー",
+        "バッグ",
+        "トート",
+        "パンツ",
+        "スニーカー",
+        "シューズ",
+        "レプリカ",
+        "コピー",
+        "ジャンク",
+        "キッズ",
+        "KIDS",
+        "ベビー",
+        "子供",
+        "ジュニア",
+        "こども"
+      ],
+      "yahoo_immediate_only": false,
+      "required_words": [
+        "ダウン",
+        "DOWN"
+      ],
+      "require_model_number": true,
+      "min_market_samples": 5,
+      "brand_name": "ヘルノ",
+      "category": "ダウン"
+    },
+    {
       "name": "レイバン サングラス",
       "max_buy_price": 15000,
       "min_buy_price": 100,

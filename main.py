@@ -200,6 +200,8 @@ def _scan_keywords(
         require_model_number = kw_conf.get("require_model_number", False)
         brand_name           = kw_conf.get("brand_name", keyword.split()[0])
         category             = kw_conf.get("category", "")
+        # モデル別相場に必要な売却済みの最少件数（少なすぎる相場は信用しない。未設定なら1件）
+        min_market_samples   = kw_conf.get("min_market_samples", 1)
 
         # 仕入れ先の検索語。ローカル画面でモデル名を選んだ場合は「カタカナ名」「英字名」の
         # 2本が search_queries に入る（app.build_plan）。通常のキーワードは keyword の1本だけ
@@ -342,6 +344,10 @@ def _scan_keywords(
                     pending.append(item)
 
             # タイトルで型番が見つからなかったアイテムは商品説明文を確認する
+            # （種別までタイトルで絞るブランド＝ヘルノのラミナーダウンコートは説明文を使わない）
+            if pending and not model_extractor.uses_description(brand_name):
+                print(f"    タイトルで対象モデルなし {len(pending)}件 → 除外（タイトルのみで照合）")
+                pending = []
             if pending:
                 print(f"    タイトルで型番なし {len(pending)}件 → 商品説明文を確認中...")
                 # 説明文は DB にキャッシュし、DESCRIPTION_CACHE_HOURS 以内に取得済みの
@@ -422,6 +428,7 @@ def _scan_keywords(
                     title_filter=name_filter,
                     filter_key=filter_key,
                     alt_keywords=alt_keywords,
+                    min_samples=min_market_samples,
                 )
                 if model_market is None:
                     print(f"    [{model}] メルカリ相場なし → スキップ")
