@@ -45,7 +45,9 @@ _PATTERNS: dict[str, list[str]] = {
         # （年・価格・サイズ等の4桁の数字を型番と誤認しないため。パターンは下で追加する）
     ],
     "グッチ": [
-        r'\bGG\s?\d{4}[A-Z]?\b',        # GG0061S
+        # GG0061S。ジャンルが「サングラス」のときは _extract_gucci_sunglasses、「時計」のときは
+        # _extract_gucci_watch で照合する（_CATEGORY_EXTRACTORS）。これはジャンル指定なしのときだけ使う
+        r'\bGG\s?\d{4}[A-Z]?\b',
     ],
     "セリーヌ": [
         r'\bCL\s?\d{5}[A-Z]?\b',        # CL40046U
@@ -464,16 +466,122 @@ def _extract_gucci_watch(title: str) -> str | None:
     return None
 
 
+# ── グッチのサングラス: 仕入れ対象の代表型番と愛称（メルカリ売却済みで相場が付くもの。2026-10 確認）──
+# 型番の形式（フレーム内側の刻印。メルカリの表記ゆれ: GG0061S / GG 0061S / gg0061s / GG-0061S /
+# GG0637SK 001 / GG0637SK-001 / GG0637SK001 のようにカラー番号が続くもの）:
+#   現行品: GG + 4桁 + S（GG0061S）。末尾の K/A/N（SK・SA=アジアンフィット、SN 等）は別型番として扱う
+#           （レイバンの F 付きと同じ。メルカリ相場で GG0061S と GG0061SK 等の差があるため。下の表参照）
+#   旧型:   「GG 2409/N/S」「GG 1799/S」「GG3525/K/S」（スラッシュ区切り）。旧型は /N/S・/F/S・/K/S 等の
+#           版違いで相場差がはっきりせず、表記もばらつく（GG2409/N/S・GG 2409 N/S・GG2409NS）ため、
+#           GG + 4桁（GG2409）にまとめる。2000〜9999 番台は旧型だけなので常に4桁にまとめる。
+#   O / OA / OJ 等（GG1470OJ）はメガネ（光学フレーム）の型番なので、サングラスでは型番として扱わない。
+# 並びは画面の表示順（メルカリ相場の中央値が高い順）
+_GUCCI_SUN_MODELS: dict[str, str] = {}   # 型番 → 愛称・シェイプ名（無いものは空文字）。下で設定
+_GUCCI_SUN_MODELS.update({
+    "GG1089SA": "チェーン",
+    "GG0396S": "スクエア",
+    "GG0818SA": "",
+    "GG0918S": "ホースビット",
+    "GG1498SK": "",
+    "GG1142SA": "",
+    "GG1662SA": "オーバル",
+    "GG1157": "オーバル・旧型",
+    "GG0077SK": "シェリーライン",
+    "GG1169S": "",
+    "GG0546SK": "",
+    "GG1023S": "",
+    "GG1690": "アンダーテンプル・旧型",
+    "GG0022SA": "スクエア",
+    "GG1403SK": "",
+    "GG0079SK": "シェリーライン",
+    "GG1339SK": "ボストン",
+    "GG0022S": "ビー（蜂）",
+    "GG0518S": "",
+    "GG0370SK": "",
+    "GG1346SK": "",
+    "GG0382S": "",
+    "GG1073SK": "GGロゴ",
+    "GG0637SK": "スクエア GGロゴ",
+    "GG0765SA": "",
+    "GG1158SK": "",
+    "GG0638SK": "",
+    "GG0154SA": "",
+    "GG0746SA": "",
+    "GG1582SK": "",
+    "GG0677SK": "",
+    "GG1715": "リムレス・旧型",
+    "GG0636SK": "",
+    "GG1000SK": "",
+    "GG3525": "ハート・旧型",
+    "GG0263S": "",
+    "GG0061S": "",
+    "GG2409": "スクエア・旧型",
+})
+
+_GUCCI_SUN_RE = re.compile(
+    # GG + 4桁、続いて旧型の「/N/S」「\S」「|S」、または現行品の末尾（S・SK・SA・O・OA 等）
+    r'(?<![A-Za-z0-9])GG[\s\-]?(\d{4})(?!\d)((?:\s?[/\\|]\s?[A-Z](?![A-Za-z]))*)([A-Z]{0,2})(?![A-Za-z])',
+    re.IGNORECASE)
+# 4桁の数字 → 代表型番（GG0061 のように末尾 S 等を省いた表記を、版違いが1つしかない代表型番に寄せる）
+_GUCCI_SUN_BY_NUM: dict[str, list[str]] = {}
+for _m in _GUCCI_SUN_MODELS:
+    _GUCCI_SUN_BY_NUM.setdefault(_m[2:6], []).append(_m)
+# 「GG」が付かない数字だけの表記（0637SK）は、現行品の代表型番に限り、末尾の S まで書かれているときだけ拾う
+# （年・価格・サイズ等の数字や、他ブランドの型番と誤認しないため）
+_GUCCI_SUN_BARE_RE = re.compile(
+    r'(?<![A-Za-z0-9.,¥￥\-/])('
+    + "|".join(sorted((m[2:] for m in _GUCCI_SUN_MODELS if len(m) > 6 and m[6] == "S"),
+                      key=len, reverse=True))
+    + r')(?![A-Za-z0-9])',
+    re.IGNORECASE)
+
+
+def _gucci_sun_key(num: str, slash: str, suf: str) -> str | None:
+    suf = suf.upper()
+    if slash or num[0] not in "01":
+        # 旧型（GG 2409/N/S・GG1799/S）は4桁にまとめる。0番台にスラッシュが付く表記（GG0061/S）は現行品
+        if num[0] == "0":
+            suf = re.sub(r'[^A-Z]', '', slash.upper()) + suf
+        else:
+            return "GG" + num
+    if suf.startswith("O"):
+        return None                 # メガネ（光学フレーム）の型番
+    cands = _GUCCI_SUN_BY_NUM.get(num, [])
+    if cands == ["GG" + num]:
+        return cands[0]             # 代表型番が旧型だけの番号（GG1799S・GG1690 S 等の表記も旧型にまとめる）
+    if suf.startswith("S"):
+        return "GG" + num + (suf[:2] if len(suf) >= 2 and suf[1] in "AKN" else "S")
+    if not suf:
+        # 末尾なし（GG0061 / GG1799）: 版違いが1つだけの代表型番ならそれに寄せる
+        if len(cands) == 1:
+            return cands[0]
+    # 末尾なし、または旧型の版違い（GG1620J・GG1927F 等）は4桁にまとめる
+    return "GG" + num
+
+
+def _extract_gucci_sunglasses(title: str) -> str | None:
+    """グッチのサングラスの型番（GG0061S / GG0637SK / 旧型 GG2409）。時計の YA126402 等は見ない"""
+    t = unicodedata.normalize("NFKC", title or "")
+    for m in _GUCCI_SUN_RE.finditer(t):
+        key = _gucci_sun_key(m.group(1), m.group(2), m.group(3))
+        if key:
+            return key
+    m = _GUCCI_SUN_BARE_RE.search(t)
+    if m:
+        return "GG" + m.group(1).upper()
+    return None
+
 # ジャンル別に型番の照合を切り替えるブランド: (ブランド, ジャンル) → 抽出関数。
-# ここに無い組み合わせは従来どおり _PATTERNS[ブランド] で照合する（グッチのサングラスは GG0061S）
+# ここに無い組み合わせは従来どおり _PATTERNS[ブランド] で照合する
 _CATEGORY_EXTRACTORS = {
     ("グッチ", "時計"): _extract_gucci_watch,
+    ("グッチ", "サングラス"): _extract_gucci_sunglasses,
 }
 
 # 画面の「型番」候補に添える愛称（ブランド → {型番: 愛称}）。例: RB2140 → ウェイファーラー
 MODEL_NUMBER_LABELS: dict[str, dict[str, str]] = {
     "レイバン": {k: v for k, v in _RAYBAN_MODELS.items() if v},
-    "グッチ": {k: v for k, v in _GUCCI_WATCH_MODELS.items() if v},
+    "グッチ": {k: v for k, v in {**_GUCCI_WATCH_MODELS, **_GUCCI_SUN_MODELS}.items() if v},
 }
 
 # 画面の「型番」候補に最初から出す代表的な型番（メルカリ売却実績の多いもの。2026-10 確認）
@@ -486,14 +594,14 @@ KNOWN_MODEL_NUMBERS: dict[str, list[str]] = {
         "NDW91952", "ND92215", "ND91950", "ND92338", "ND92237", "ND92340", "ND92031",
         "ND92342", "ND18174", "ND91915", "ND91930", "ND92232", "ND92557", "ND92231",
     ],
-    # グッチは時計の型番だけ（サングラスの GG0061S 等は過去の検出実績から出る）
-    "グッチ": list(_GUCCI_WATCH_MODELS),
+    # グッチは時計とサングラスの型番（画面では選択中のジャンルの型番だけを出す。MODEL_NUMBER_CATEGORIES）
+    "グッチ": list(_GUCCI_WATCH_MODELS) + list(_GUCCI_SUN_MODELS),
 }
 
 # 型番の候補のうち、特定のジャンル専用のもの（ブランド → {型番: ジャンル}）。
 # 画面では選択中のジャンルの型番だけを出し、リサーチでもそのジャンルのキーワードにだけ使う
 MODEL_NUMBER_CATEGORIES: dict[str, dict[str, str]] = {
-    "グッチ": {m: "時計" for m in _GUCCI_WATCH_MODELS},
+    "グッチ": {**{m: "時計" for m in _GUCCI_WATCH_MODELS}, **{m: "サングラス" for m in _GUCCI_SUN_MODELS}},
 }
 
 # ── ブランド名の表記ゆれ（他ブランド混入チェック用） ──────────────────────
@@ -666,7 +774,8 @@ def extract_name(title: str, brand: str) -> str | None:
 # レイバンはメルカリで「RB2140」と検索すると RB2140F（アジアンフィット、相場が高い）も
 # 混ざるため、型番ごとに分けて相場を出す。
 # グッチ時計も同様（「グッチ 1500L」で検索すると 1400L・1900L 等も混ざる）。
-_EXACT_NUMBER_BRANDS = {"レイバン", ("グッチ", "時計")}
+# グッチのサングラスも同様（「グッチ GG0022S」で検索すると GG0022SA も混ざる）。
+_EXACT_NUMBER_BRANDS = {"レイバン", ("グッチ", "時計"), ("グッチ", "サングラス")}
 
 
 def exact_number_market(brand: str, category: str = "") -> bool:
