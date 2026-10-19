@@ -304,11 +304,11 @@ def _scan_keywords(
         #    → 他ブランドやあいまいマッチによる誤混入を防ぐ
         if effective_required:
             before = len(sources_items)
-            # 大文字小文字は区別しない（THE NORTH FACE / The North Face など）
-            req_lower = [w.lower() for w in effective_required]
+            # 大文字小文字は区別しない（THE NORTH FACE / The North Face など）。
+            # LV 等の短い英字は単語境界付きで照合する（SILVER の lv に一致させない。model_extractor.has_word）
             sources_items = [
                 item for item in sources_items
-                if any(w in item.title.lower() for w in req_lower)
+                if any(model_extractor.has_word(item.title, w) for w in effective_required)
             ]
             removed = before - len(sources_items)
             if removed > 0:

@@ -284,6 +284,118 @@ _STRICT_EN = {
     "ランス": "REIMS", "コクーン": "COCOON", "バロー": "BARROW", "カンヌ": "CANNES",
     "ラミナー": "LAMINAR",
 }
+
+
+# ── ルイ・ヴィトンのバッグ: モデル名（型番 M/N+5桁が無い出品だけモデル名で照合する）──────
+# サイズで相場が大きく変わるモデル（スピーディ25/30/35、ネヴァーフルPM/MM/GM 等）は
+# サイズ別に別モデルとして判定する（デュベティカのドゥエ/セイと同じ考え方）。
+#   require_size=True : サイズが書かれていない出品はモデル名では照合しない（型番か説明文で照合する）
+#   require_size=False: サイズが無ければサイズなしのモデル名（例: トロカデロ）として扱う
+# バンドリエール（ショルダー付き）はタイトルのどこかに「バンドリエール」があれば別モデルにする。
+# 照合はジャンルが「バッグ」のときだけ（_extract_lv_bag。サングラスの照合には使わない）
+_LV_SEP = r'[\s・･\-_/]*'
+_LV_BAND = r'(?:バンドリエ[ー\-]?ル|BANDOULI[EÈ]RE)'
+_LV_HAS_BAND = r'(?s)^(?=.*' + _LV_BAND + r').*?'      # タイトルのどこかにバンドリエール
+_LV_NO_BAND = r'(?s)^(?!.*' + _LV_BAND + r').*?'       # バンドリエールなし
+_LV_MINI = ("ミニ", "MINI", r'(?:ミニ|MINI(?![A-Za-z]))')
+
+
+def _lv_size(label: str) -> tuple[str, str, str]:
+    """サイズ表記（25 / PM / MM 等）→ (カタカナ側の表記, 英字側の表記, 正規表現)"""
+    if label.isdigit():
+        return label, label, r'(?<!\d)' + label + r'(?!\d)'      # 30 / 30cm（300 等は除く）
+    return label, label, label + r'(?![A-Za-z])'                  # PM / MM（PMS 等は除く）
+
+
+def _lv_sized(canon: str, en: str, kana: str, eng: str, sizes: list, require_size: bool,
+              cond: str = "", band: bool = False) -> list[tuple[str, str, list[str]]]:
+    """サイズ別のモデル（スピーディ25 等）と、必要ならサイズなしのモデルを作る。
+    kana / eng: モデル名の正規表現（英字は前に英字が続かないこと _A を付けて使う）。
+    band: サイズの前に「バンドリエール」が入る表記（スピーディ・バンドリエール・25）も許す"""
+    mid = _LV_SEP + (r'(?:' + _LV_BAND + _LV_SEP + r')?' if band else "")
+    out = []
+    for s in sizes:
+        k_label, e_label, sre = _lv_size(s) if isinstance(s, str) else s
+        pats = [cond + r'(?:' + kana + r')' + mid + r'(?:' + sre + r')',
+                cond + _A + r'(?:' + eng + r')' + mid + r'(?:' + sre + r')']
+        if k_label == "ミニ":    # 「ミニ・パームスプリングス」のようにサイズが前に来る表記
+            pats += [cond + r'(?:' + sre + r')' + _LV_SEP + r'(?:' + kana + r')',
+                     cond + _A + r'(?:' + sre + r')' + _LV_SEP + r'(?:' + eng + r')' + _Z]
+        out.append((canon + k_label, f"{en} {e_label}", pats))
+    if not require_size:
+        out.append((canon, en, [cond + r'(?:' + kana + r')', cond + _A + r'(?:' + eng + r')' + _Z]))
+    return out
+
+
+def _lv(canon: str, en: str, kana: str, eng: str) -> list[tuple[str, str, list[str]]]:
+    """サイズ違いを分けないモデル"""
+    return [(canon, en, [kana, _A + r'(?:' + eng + r')' + _Z])]
+
+
+_LV_ACC = r'アクセ(?:ソワール|ソアール|ソワ|サリー)'
+_LV_BAG_MODELS: list[tuple[str, str, list[str]]] = [
+    # スピーディ: ナノ → バンドリエール（サイズ別）→ 通常（サイズ別）の順
+    *_lv(        "ナノスピーディ", "NANO SPEEDY", r'ナノ' + _LV_SEP + r'スピーディー?', r'NANO\s*SPEEDY'),
+    *_lv_sized("スピーディバンドリエール", "SPEEDY BANDOULIERE", r'スピーディー?', r'SPEEDY',
+               ["20", "25", "30", "35", "40"], require_size=True, cond=_LV_HAS_BAND, band=True),
+    *_lv_sized("スピーディ", "SPEEDY", r'スピーディー?', r'SPEEDY',
+               ["25", "30", "35", "40"], require_size=True, cond=_LV_NO_BAND),
+    *_lv_sized("ネヴァーフル", "NEVERFULL", r'ネ(?:ヴァ|バ|ヴ)ー?フル', r'NEVER\s*FULL',
+               ["BB", "PM", "MM", "GM"], require_size=True),
+    *_lv_sized("アルマ", "ALMA", r'(?<![ァ-ヶー])アルマ(?!ー?ニ)', r'ALMA',
+               ["BB", "PM", "MM", "GM"], require_size=True),
+    # ミュルティ・ポシェット → ミニ・ポシェット → ポシェット・アクセソワール の順（部分文字列を含むため）
+    *_lv("ミュルティポシェットアクセソワール", "MULTI POCHETTE ACCESSOIRES",
+         r'(?:ミュルティー?|マルチ)' + _LV_SEP + r'ポシェット', r'MULTI\s*-?\s*POCHETTE'),
+    *_lv("ミニポシェットアクセソワール", "MINI POCHETTE ACCESSOIRES",
+         r'ミニ' + _LV_SEP + r'ポシェット' + _LV_SEP + _LV_ACC, r'MINI\s*POCHETTE\s*ACCESSOIRES?'),
+    *_lv("ポシェットアクセソワール", "POCHETTE ACCESSOIRES",
+         r'ポシェット' + _LV_SEP + _LV_ACC + r'|(?<![ァ-ヶー])アクセソワール', r'POCHETTE\s*ACCESSOIRES?'),
+    *_lv("ポシェットメティス", "POCHETTE METIS", r'ポシェット' + _LV_SEP + r'メティス|(?<![ァ-ヶー])メティス', r'(?:POCHETTE\s*)?M[EÉ]TIS'),
+    *_lv("ポシェットフェリシー", "POCHETTE FELICIE", r'フェリシー', r'F[EÉ]LICIE'),
+    *_lv_sized("オンザゴー", "ON THE GO", r'オン' + _LV_SEP + r'ザ' + _LV_SEP + r'ゴー?',
+               r'ON\s*-?\s*THE\s*-?\s*GO|ONTHEGO', ["PM", "MM", "GM"], require_size=True),
+    *_lv_sized("キーポルバンドリエール", "KEEPALL BANDOULIERE", r'キーポー?ル', r'KEEPALL',
+               ["45", "50", "55", "60"], require_size=True, cond=_LV_HAS_BAND, band=True),
+    *_lv_sized("キーポル", "KEEPALL", r'キーポー?ル', r'KEEPALL',
+               ["45", "50", "55", "60"], require_size=True, cond=_LV_NO_BAND),
+    *_lv_sized("ドーフィーヌ", "DAUPHINE", r'ドーフィーヌ', r'DAUPHINE', [_LV_MINI, "MM"], require_size=False),
+    *_lv_sized("カプシーヌ", "CAPUCINES", r'カプシーヌ', r'CAPUCINES?',
+               [_LV_MINI, "BB", "PM", "MM", "GM"], require_size=True),
+    *_lv_sized("ツイスト", "TWIST", r'(?<![ァ-ヶー])ツイスト(?!' + _LV_SEP + r'ロック)', r'TWIST',
+               [_LV_MINI, "PM", "MM"], require_size=False),
+    # プチノエ・ネオノエ・ノエBB は通常のノエ（ノエGM）と相場が違うので別モデル
+    *_lv("プチノエ", "PETIT NOE", r'プチ' + _LV_SEP + r'ノエ', r'PETIT\s*-?\s*NO[EÉ]'),
+    *_lv("ネオノエ", "NEO NOE", r'ネオ' + _LV_SEP + r'ノエ', r'NEO\s*-?\s*NO[EÉ]'),
+    *_lv_sized("ノエ", "NOE", r'(?<![ァ-ヶー])ノエ(?![ァ-ヶー])', r'NO[EÉ]', ["BB"], require_size=False),
+    *_lv_sized("バティニョール", "BATIGNOLLES", r'バティニョール', r'BATIGNOLLES?',
+               [("オリゾンタル", "HORIZONTAL", r'オリゾンタル|HORIZONTAL(?![A-Za-z])'),
+                ("ヴェルティカル", "VERTICAL", r'(?:ヴェ|ベ)ルティカル|VERTICAL(?![A-Za-z])')], require_size=False),
+    *_lv_sized("パームスプリングス", "PALM SPRINGS", r'パーム' + _LV_SEP + r'スプリングス?',
+               r'PALM\s*SPRINGS?', [_LV_MINI, "PM", "MM"], require_size=True),
+    *_lv_sized("モンスリ", "MONTSOURIS", r'モンスリ', r'MONTSOURIS',
+               [_LV_MINI, "BB", "PM", "MM", "GM"], require_size=False),
+    *_lv("ブローニュ", "BOULOGNE", r'ブローニュ', r'BOULOGNE'),
+    *_lv("トロカデロ", "TROCADERO", r'トロカデロ', r'TROCADERO'),
+    *_lv("エヴァ", "EVA", r'(?<![ァ-ヶー])エヴァ(?![ァ-ヶー])', r'EVA'),
+    *_lv_sized("ルーピング", "LOOPING", r'ルーピング', r'LOOPING', ["PM", "MM", "GM"], require_size=False),
+    *_lv("ディアヌ", "DIANE", r'ディアヌ', r'DIANE'),
+    *_lv_sized("カルトシエール", "CARTOUCHIERE", r'カルトシエール', r'CARTOUCHI[EÈ]RE',
+               ["PM", "MM", "GM"], require_size=False),
+    *_lv("マレル", "MARELLE", r'(?<![ァ-ヶー])マレル', r'MARELLE'),
+    *_lv("ソミュール", "SAUMUR", r'ソミュール', r'SAUMUR'),
+    *_lv("ミュゼットタンゴ", "MUSETTE TANGO", r'ミュゼット' + _LV_SEP + r'タンゴ', r'MUSETTE\s*TANGO'),
+    *_lv("ミュゼット", "MUSETTE", r'ミュゼット', r'MUSETTE'),
+    *_lv("サックプラ", "SAC PLAT", r'サック' + _LV_SEP + r'プラ(?![ァ-ヶー])', r'SAC\s*PLAT'),
+    *_lv("ポパンクール", "POPINCOURT", r'ポパンクール', r'POPINCOURT'),
+]
+_STRICT_MODELS["ルイヴィトン"] = [(name, pats) for name, _en, pats in _LV_BAG_MODELS]
+_STRICT_EN.update({name: en for name, en, _pats in _LV_BAG_MODELS})
+# モデル名の照合をこのジャンルに限るブランド（ルイヴィトンのサングラスにバッグのモデル名を使わない）
+_NAME_CATEGORIES = {"ルイヴィトン": "バッグ"}
+# モデル名の照合前に全角英数字等を整える（NFKC）ブランド
+_NFKC_NAME_BRANDS = {"ルイヴィトン"}
+
 for _brand, _models in _STRICT_MODELS.items():
     _MODEL_NAMES[_brand] = [x for _name, _ in _models for x in (_name, _STRICT_EN[_name])]
 
@@ -654,12 +766,64 @@ def _extract_celine_sunglasses(title: str) -> str | None:
     return None
 
 
+# ── ルイ・ヴィトンのバッグ: 型番（M+5桁 / ダミエ等の N+5桁）を優先し、無ければモデル名で照合 ──
+# メルカリの表記ゆれ: M40995 / m40995 / M 40995 / M-40995 / Ｍ４０９９５（全角）→ M40995
+# 財布・小物にも同じ形式の型番があるため（M60017 ポルトフォイユ・サラ、M62650 ポシェット・クレ 等）、
+# 型番はタイトルに「バッグ」「ショルダー」「トート」等の語か、バッグのモデル名があるときだけ採用する。
+# 財布・小物そのものは config.json の exclude_words（財布・ウォレット・キーケース 等）で除外する。
+# サングラスの型番（Z1502W 等）はジャンルが「サングラス」のときだけ _PATTERNS で照合する
+_LV_NUMBER_RE = re.compile(r'(?<![A-Za-z0-9])([MN])[\s\-]?(\d{5})(?!\d)', re.IGNORECASE)
+_LV_NUMBER_ONLY_RE = re.compile(r'\s*([MN])[\s\-]?(\d{5})\s*', re.IGNORECASE)
+_LV_BAG_WORDS_RE = re.compile(
+    r'バッグ|バック(?!パック)|かばん|カバン|鞄|ショルダー|トート|ハンド|ボストン|リュック|バックパック|クラッチ'
+    r'|ポシェット|ポーチ|メッセンジャー|ボディ|ウエスト|斜め?[掛が]け|肩掛け|手提げ|2WAY'
+    r'|(?<![A-Z])(?:BAG|SAC|TOTE|SHOULDER|POCHETTE|BACKPACK|CLUTCH|BOSTON)(?![A-Z])'
+    # サイズが無くてモデル名としては照合しない書き方（「スピーディ M41526」）も、バッグの型番として採用する
+    r'|スピーディ|ネ(?:ヴァ|バ|ヴ)ー?フル|キーポー?ル|(?<![ァ-ヶー])アルマ(?!ー?ニ)|カプシーヌ|オン\s*ザ\s*ゴー?'
+    r'|パーム\s*スプリング|(?<![A-Z])(?:SPEEDY|NEVER\s*FULL|KEEPALL|ALMA|CAPUCINES?|ON\s*THE\s*GO)(?![A-Z])',
+    re.IGNORECASE)
+
+
+def _extract_lv_bag(title: str) -> str | None:
+    """ルイ・ヴィトンのバッグの型番（M40995 / N41358）、無ければモデル名（スピーディ30 等）"""
+    t = unicodedata.normalize("NFKC", title or "")
+    m = _LV_NUMBER_ONLY_RE.fullmatch(t)
+    if m:                          # 型番だけが渡されたとき（画面の型番候補・自由入力の判定）
+        return m.group(1).upper() + m.group(2)
+    name = extract_name(t, "ルイヴィトン")
+    m = _LV_NUMBER_RE.search(t)
+    if m and (name or _LV_BAG_WORDS_RE.search(t)):
+        return m.group(1).upper() + m.group(2)
+    return name
+
+
 # ジャンル別に型番の照合を切り替えるブランド: (ブランド, ジャンル) → 抽出関数。
 # ここに無い組み合わせは従来どおり _PATTERNS[ブランド] で照合する
 _CATEGORY_EXTRACTORS = {
     ("グッチ", "時計"): _extract_gucci_watch,
     ("グッチ", "サングラス"): _extract_gucci_sunglasses,
     ("セリーヌ", "サングラス"): _extract_celine_sunglasses,
+    ("ルイヴィトン", "バッグ"): _extract_lv_bag,
+}
+
+# ルイ・ヴィトンのバッグの代表型番とモデル名（画面の「型番の候補」に愛称付きで出す）。
+# 相場表プロジェクトの型番逆引きマスター（バッグの行）と定番品から選んだもの（2026-10）。
+# メルカリ売却済みでの件数は未確認なので、相場が出ない型番は自然にスキップされる
+_LV_BAG_NUMBERS: dict[str, str] = {
+    "M40995": "ネヴァーフルMM", "N41358": "ネヴァーフルMM（ダミエ）", "N41359": "ネヴァーフルPM（ダミエ）",
+    "M41528": "スピーディ25", "M41526": "スピーディ30", "M41524": "スピーディ35", "M41522": "スピーディ40",
+    "N41531": "スピーディ30（ダミエ）", "M41113": "スピーディバンドリエール25", "M41112": "スピーディバンドリエール30",
+    "M53151": "アルマ", "M53152": "アルマBB", "N41221": "アルマBB（ダミエ）",
+    "M51980": "ポシェットアクセソワール", "M44813": "ミュルティポシェットアクセソワール",
+    "M44875": "ポシェットメティス", "M61276": "ポシェットフェリシー", "N55213": "エヴァ（ダミエ）",
+    "M44576": "オンザゴーGM", "M44391": "ドーフィーヌMM",
+    "M41428": "キーポル45", "M41426": "キーポル50", "M41424": "キーポル55", "M41422": "キーポル60",
+    "M42224": "ノエ", "M42226": "プチノエ",
+    "M44871": "パームスプリングスPM", "M44873": "パームスプリングスミニ", "M51137": "ミニモンスリ",
+    "M51154": "バティニョールオリゾンタル", "M51156": "バティニョール",
+    "M51265": "ブローニュ30", "M51274": "トロカデロ27", "M51272": "トロカデロ30",
+    "M51145": "ルーピングMM", "M51146": "ルーピングGM",
+    "M42256": "ソミュール30", "M51140": "サックプラ", "M40007": "ポパンクールオ",
 }
 
 # 画面の「型番」候補に添える愛称（ブランド → {型番: 愛称}）。例: RB2140 → ウェイファーラー
@@ -667,6 +831,7 @@ MODEL_NUMBER_LABELS: dict[str, dict[str, str]] = {
     "レイバン": {k: v for k, v in _RAYBAN_MODELS.items() if v},
     "グッチ": {k: v for k, v in {**_GUCCI_WATCH_MODELS, **_GUCCI_SUN_MODELS}.items() if v},
     "セリーヌ": {k: v for k, v in _CELINE_SUN_MODELS.items() if v},
+    "ルイヴィトン": dict(_LV_BAG_NUMBERS),
 }
 
 # 画面の「型番」候補に最初から出す代表的な型番（メルカリ売却実績の多いもの。2026-10 確認）
@@ -682,6 +847,7 @@ KNOWN_MODEL_NUMBERS: dict[str, list[str]] = {
     # グッチは時計とサングラスの型番（画面では選択中のジャンルの型番だけを出す。MODEL_NUMBER_CATEGORIES）
     "グッチ": list(_GUCCI_WATCH_MODELS) + list(_GUCCI_SUN_MODELS),
     "セリーヌ": list(_CELINE_SUN_MODELS),
+    "ルイヴィトン": list(_LV_BAG_NUMBERS),
 }
 
 # 型番の候補のうち、特定のジャンル専用のもの（ブランド → {型番: ジャンル}）。
@@ -689,6 +855,7 @@ KNOWN_MODEL_NUMBERS: dict[str, list[str]] = {
 MODEL_NUMBER_CATEGORIES: dict[str, dict[str, str]] = {
     "グッチ": {**{m: "時計" for m in _GUCCI_WATCH_MODELS}, **{m: "サングラス" for m in _GUCCI_SUN_MODELS}},
     "セリーヌ": {m: "サングラス" for m in _CELINE_SUN_MODELS},
+    "ルイヴィトン": {m: "バッグ" for m in _LV_BAG_NUMBERS},
 }
 
 # ── ブランド名の表記ゆれ（他ブランド混入チェック用） ──────────────────────
@@ -714,7 +881,9 @@ BRAND_ALIASES: dict[str, list[str]] = {
     "グッチ": ["グッチ", "GUCCI"],
     "セリーヌ": ["セリーヌ", "CELINE", "CÉLINE"],
     "プラダ": ["プラダ", "PRADA"],
-    "ルイヴィトン": ["ルイヴィトン", "ルイ・ヴィトン", "ルイ ヴィトン", "ヴィトン", "LOUIS VUITTON", "VUITTON"],
+    # 「ルイビトン」等の誤記も拾う。LV は「SILVER」等に部分一致するため単語境界付きで照合する（_WORD_ALIASES）
+    "ルイヴィトン": ["ルイヴィトン", "ルイ・ヴィトン", "ルイ ヴィトン", "ヴィトン", "ビトン",
+                  "LOUIS VUITTON", "VUITTON", "LV"],
     "シャネル": ["シャネル", "CHANEL"],
     "オークリー": ["オークリー", "OAKLEY"],
     "トムフォード": ["トムフォード", "トム・フォード", "トム フォード", "TOM FORD", "TOMFORD"],
@@ -731,9 +900,21 @@ BRAND_ALIASES: dict[str, list[str]] = {
 }
 
 # 前後に英字が続かないときだけ一致とする表記（単語境界付きで照合する）。ここに無い表記は従来どおり部分一致
-_WORD_ALIASES = {"HERNO"}
+_WORD_ALIASES = {"HERNO", "LV"}
 _WORD_ALIAS_RE = {a: re.compile(r'(?<![A-Za-z])' + re.escape(a) + r'(?![A-Za-z])', re.IGNORECASE)
                   for a in _WORD_ALIASES}
+
+
+def has_word(title: str, word: str) -> bool:
+    """タイトルに語が含まれるか（大文字小文字は区別しない）。required_words の照合用。
+    _WORD_ALIASES の語（LV・HERNO）は前後に英字が続かないときだけ一致とする（SILVER の lv 等を除く）"""
+    # 全角英数字・半角カナも同じ語として扱う（ＬＯＵＩＳ ＶＵＩＴＴＯＮ / ﾀﾞｳﾝ）
+    title = unicodedata.normalize("NFKC", title or "")
+    word = unicodedata.normalize("NFKC", word or "")
+    rx = _WORD_ALIAS_RE.get(word.upper())
+    if rx is not None:
+        return bool(rx.search(title))
+    return word.lower() in title.lower()
 
 
 def brand_aliases(brand: str) -> list[str]:
@@ -743,10 +924,11 @@ def brand_aliases(brand: str) -> list[str]:
 
 def has_brand(title: str, brand: str) -> bool:
     """タイトルにブランド名（いずれかの表記）が含まれるか。大文字小文字は区別しない"""
-    t = (title or "").lower()
+    title = unicodedata.normalize("NFKC", title or "")   # 全角英字（ＶＵＩＴＴＯＮ）も同じ表記として扱う
+    t = title.lower()
     for a in brand_aliases(brand):
         if a in _WORD_ALIAS_RE:
-            if _WORD_ALIAS_RE[a].search(title or ""):
+            if _WORD_ALIAS_RE[a].search(title):
                 return True
         elif a.lower() in t:
             return True
@@ -838,6 +1020,8 @@ def search_names(model: str, brand: str = "") -> list[str]:
 def extract_name(title: str, brand: str) -> str | None:
     """モデル名だけを照合して返す（型番は見ない）。どの表記で見つかっても正規名（カタカナ）を返す"""
     if brand in _STRICT_COMPILED:
+        if brand in _NFKC_NAME_BRANDS:
+            title = unicodedata.normalize("NFKC", title or "")
         rule = _TITLE_RULES.get(brand)
         if rule is not None:
             key = _n(title)
@@ -863,7 +1047,9 @@ def extract_name(title: str, brand: str) -> str | None:
 # グッチ時計も同様（「グッチ 1500L」で検索すると 1400L・1900L 等も混ざる）。
 # グッチのサングラスも同様（「グッチ GG0022S」で検索すると GG0022SA も混ざる）。
 # セリーヌのサングラスも同様（「セリーヌ CL40034F」で検索すると CL4003IN も混ざる）。
-_EXACT_NUMBER_BRANDS = {"レイバン", ("グッチ", "時計"), ("グッチ", "サングラス"), ("セリーヌ", "サングラス")}
+# ルイ・ヴィトンのバッグも同様（「ルイヴィトン M40995」の検索結果に別の型番の売却済みが混ざるのを除く）。
+_EXACT_NUMBER_BRANDS = {"レイバン", ("グッチ", "時計"), ("グッチ", "サングラス"), ("セリーヌ", "サングラス"),
+                        ("ルイヴィトン", "バッグ")}
 
 
 def exact_number_market(brand: str, category: str = "") -> bool:
@@ -871,8 +1057,24 @@ def exact_number_market(brand: str, category: str = "") -> bool:
 
 
 def has_category_extractor(brand: str) -> bool:
-    """ジャンルによって型番の照合が変わるブランドか（グッチ: 時計とサングラス、セリーヌ: サングラス）"""
+    """ジャンルによって型番の照合が変わるブランドか（グッチ: 時計とサングラス、セリーヌ: サングラス、
+    ルイヴィトン: バッグ）"""
     return any(b == brand for b, _c in _CATEGORY_EXTRACTORS)
+
+
+def name_fits(model: str, brand: str, category: str) -> bool:
+    """モデル名をそのジャンルのキーワードで使えるか。モデル名がジャンル限定のブランド
+    （ルイヴィトン: バッグ）だけ判定し、登録済みのモデル名は限定先のジャンルでだけ使う"""
+    only = _NAME_CATEGORIES.get(brand)
+    if not only or category == only:
+        return True
+    return extract_name(model, brand) != model
+
+
+def model_category(model: str, brand: str) -> str | None:
+    """ジャンル限定のモデル名なら、そのジャンル（例: スピーディ30 → バッグ）"""
+    only = _NAME_CATEGORIES.get(brand)
+    return only if only and extract_name(model, brand) == model else None
 
 
 def is_strict_brand(brand: str) -> bool:
@@ -902,7 +1104,11 @@ def extract(title: str, brand: str = "", category: str = "") -> str | None:
             sep = r'[\s\-]+' if brand in _STRIP_HYPHEN_BRANDS else r'\s+'
             return re.sub(sep, '', match.group(0)).upper()
 
-    # 型番が無ければモデル名で照合（型番が取れた商品は型番の相場を優先する）
+    # 型番が無ければモデル名で照合（型番が取れた商品は型番の相場を優先する）。
+    # モデル名がジャンル限定のブランド（ルイヴィトン=バッグ）は、他のジャンルではモデル名を使わない
+    only = _NAME_CATEGORIES.get(brand)
+    if only and category and category != only:
+        return None
     return extract_name(title, brand)
 
 

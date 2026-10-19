@@ -212,7 +212,7 @@ def _playwright_sold_prices(
         title = raw_title.lower()
         if ex_lower and any(w in title for w in ex_lower):
             continue
-        if req_lower and not any(w in title for w in req_lower):
+        if req_lower and not any(model_extractor.has_word(title, w) for w in req_lower):
             continue
         if brand_token and not model_extractor.has_brand(title, kw_tokens[0]):
             continue

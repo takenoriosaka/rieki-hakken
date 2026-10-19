@@ -227,6 +227,11 @@ function numbersFor(b) {
   const cats = (OPTIONS.model_number_categories || {})[b] || {};
   return (OPTIONS.model_numbers[b] || []).filter(m => !cats[m] || state.categories.has(cats[m]));
 }
+// ジャンル専用のモデル名（ルイヴィトンの スピーディ30 → バッグ）も、そのジャンルを選んでいるときだけ出す
+function modelsFor(b) {
+  const cats = (OPTIONS.model_categories || {})[b] || {};
+  return (OPTIONS.models[b] || []).filter(m => !cats[m] || state.categories.has(cats[m]));
+}
 // 選択中の型番のうち、いま選んでいるジャンルで使えるもの（"ブランド|型番"）
 function activeNumbers() {
   return [...state.model_numbers].filter(v => {
@@ -237,7 +242,7 @@ function activeNumbers() {
 }
 function renderModels() {
   const brands = selectedVisibleBrands();
-  const withOpts = brands.filter(b => (OPTIONS.models[b] || []).length || numbersFor(b).length);
+  const withOpts = brands.filter(b => modelsFor(b).length || numbersFor(b).length);
   const without = brands.filter(b => !withOpts.includes(b));
   const labels = OPTIONS.model_number_labels || {};
   const chip = (group, b, m) => {
@@ -248,7 +253,7 @@ function renderModels() {
     return `<button type="button" class="chip ${on ? 'on' : ''}" aria-pressed="${on}" data-toggle="${group}" data-value="${esc(v)}">${on ? '✓ ' : ''}${esc(m)}${nick ? ` <small>${esc(nick)}</small>` : ''}</button>`;
   };
   let html = withOpts.map(b => {
-    const ms = OPTIONS.models[b] || [], ns = numbersFor(b);
+    const ms = modelsFor(b), ns = numbersFor(b);
     const cnt = [...state.models, ...activeNumbers()].filter(v => v.startsWith(b + '|')).length;
     return `
     <details class="model-group" data-brand="${esc(b)}" ${openDetails.has(b) ? 'open' : ''}>

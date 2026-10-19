@@ -75,6 +75,12 @@ def _has_digit(s: str) -> bool:
     return bool(re.search(r"\d", s))
 
 
+def _is_number(m: str, brand: str) -> bool:
+    """型番として扱うか。数字を含んでもモデル名として登録済みのもの（ルイヴィトンの
+    スピーディ30・キーポル55 等）はモデル名として扱う"""
+    return _has_digit(m) and model_extractor.extract_name(m, brand) != m
+
+
 def _norm(s: str) -> str:
     """型番・モデル名の比較用（空白・ハイフン・ドット・中黒を除去して大文字化）"""
     return re.sub(r"[\s\-_.・]", "", s or "").upper()
@@ -182,7 +188,7 @@ def build_options() -> dict:
                        for b, ms in models.items()}
         for r in rows:
             b, m = r["brand"], r["model"]
-            if _has_digit(m):
+            if _is_number(m, b):
                 add(numbers, b, m)
             elif m.upper() not in known_upper.get(b, set()):
                 add(models, b, m)
@@ -203,9 +209,14 @@ def build_options() -> dict:
         # ジャンル専用の型番（ブランド → {型番: ジャンル}）。例: グッチ YA126402 → 時計。
         # 画面では選択中のジャンルの型番だけを出す（グッチのサングラスだけ選んだときに時計の型番を出さない）
         "model_number_categories": _number_categories(numbers),
+        # ジャンル専用のモデル名（ブランド → {モデル名: ジャンル}）。例: ルイヴィトン スピーディ30 → バッグ
+        "model_categories": {
+            b: {m: c for m in ms for c in [model_extractor.model_category(m, b)] if c}
+            for b, ms in models.items()
+        },
         # 英字名でも検索するモデル（ブランド → {カタカナ名: 英字名}）。画面の所要時間の目安に使う
         "model_en": {
-            b: {m: n[1] for m in ms if not _has_digit(m)
+            b: {m: n[1] for m in ms if not _is_number(m, b)
                 for n in [model_extractor.search_names(m, b)] if len(n) > 1}
             for b, ms in models.items()
         },
@@ -272,7 +283,9 @@ def build_plan(req: dict, cfg: dict) -> list[tuple[dict, str | None]]:
             continue
         targets = picked.get(brand, []) + free_for.get(brand, [])
         # グッチ等: 時計の型番はサングラスのキーワードでは使わない（逆も同じ）
-        targets = [m for m in targets if not _has_digit(m) or _number_fits(m, brand, cat)]
+        targets = [m for m in targets if not _is_number(m, brand) or _number_fits(m, brand, cat)]
+        # ルイヴィトン: バッグのモデル名（スピーディ30 等）はサングラスのキーワードでは使わない
+        targets = [m for m in targets if _is_number(m, brand) or model_extractor.name_fits(m, brand, cat)]
         if not targets:
             if kw["name"] not in seen:
                 seen.add(kw["name"])
@@ -291,7 +304,7 @@ def build_plan(req: dict, cfg: dict) -> list[tuple[dict, str | None]]:
             # の2本で検索する（英字だけのタイトルの出品も拾うため）。ラクマ・ヤフオクは
             # デュベティカ/DUVETICA 等のブランド名を同一視して検索するので、英字側の
             # ブランド名はカタカナのままでよく、ジャンル語（ダウン等）を付けない方が多く拾える。
-            if _has_digit(m):
+            if _is_number(m, brand):
                 c["name"] = f"{brand} {m}"
             else:
                 names = model_extractor.search_names(m, brand)
