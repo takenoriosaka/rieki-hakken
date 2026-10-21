@@ -170,7 +170,8 @@ def build_options() -> dict:
                 add(models, _brand_of(kw), t)
     for brand, names in model_extractor._MODEL_NAMES.items():
         for n in names:
-            if not n.isascii():          # 英字の別名は日本語名とまとめて扱う
+            # 英字の別名は日本語名とまとめて扱う。英数字だけの正規名（ティファニーの 1837）は出す
+            if not n.isascii() or model_extractor.model_names(n, brand)[0] == n:
                 add(models, brand, n)
     # 代表的な型番（ノースフェイスの ND91950 等）は過去の検出実績が無くても候補に出す
     for brand, nums in getattr(model_extractor, "KNOWN_MODEL_NUMBERS", {}).items():

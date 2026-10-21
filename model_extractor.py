@@ -131,11 +131,8 @@ _MODEL_NAMES: dict[str, list[str]] = {
         "ジュストアンクル", "JUSTE UN CLOU",
         "トリニティ", "TRINITY", "パンテール", "PANTHERE", "クラッシュ", "CRASH",
     ],
-    "ティファニー": [
-        "Tスマイル", "T SMILE", "オープンハート", "OPEN HEART",
-        "ハードウェア", "HARDWEAR", "Tワイヤー", "T WIRE", "ノット", "KNOT",
-        "セッティング", "SETTING",
-    ],
+    # ティファニーは厳密照合（_TIFFANY_MODELS）。ここには下のループで正規名・英字名が入る
+    "ティファニー": [],
     "ヴァンクリーフ&アーペル": [
         "アルハンブラ", "ALHAMBRA",
     ],
@@ -177,6 +174,15 @@ _MODEL_VARIANTS: dict[str, list[str]] = {
     "フォールディングウェイファーラー": ["フォールディングウェイファラー"],
     "ウェイファーラー": ["ウェイファラー", "ウェーファーラー"],
     "アビエーター": ["アビエイター", "アヴィエーター"],
+    # ティファニー（画面・型番欄に入力された表記を正規名に寄せる。照合自体は _TIFFANY_MODELS）
+    "リターントゥティファニー": ["RTT", "リターントゥ"],
+    "Tワン": ["T1", "ティーワン"],
+    "Tスマイル": ["ティースマイル"],
+    "ハードウェア": ["ハードウエア"],
+    "ビクトリア": ["ヴィクトリア"],
+    "ソリテール": ["ソリティア"],
+    "ラブノット": ["フックアンドアイ", "フック&アイ"],
+    "ビーン": ["ビーンズ"],
 }
 
 
@@ -451,10 +457,139 @@ _LV_BAG_MODELS: list[tuple[str, str, list[str]]] = [
 ]
 _STRICT_MODELS["ルイヴィトン"] = [(name, pats) for name, _en, pats in _LV_BAG_MODELS]
 _STRICT_EN.update({name: en for name, en, _pats in _LV_BAG_MODELS})
+
+
+# ── ティファニー: モデル名（コレクション名）。メルカリの売却済みタイトル約1,700件（ログインなしで取得）から、
+# 実際に売れているコレクション名を拾ったもの（2026-10 確認）。各行の件数は、そのうち config.json の
+# 「ティファニー ジュエリー」の条件（required_words 等）を満たす約1,450件で、そのモデルと判定された件数。
+# 「ハート」「キー」「クロス」「X」「ナロー」「ロック」だけでは他の商品・別コレクションと紛れるため、
+# 前後の語で絞る（キーはキーリング・キーホルダーを除く、クロスは「クロス ネックレス」等の形だけ等）。
+# 並びは優先度順（派生・限定ラインを先に）:
+#   ハードウェアのボール/マイクロ/スモール/ラージ → ハードウェア（相場が 3万〜16万円と大きく違う）
+#   ダブルハートタグ → ハートタグ → リターントゥティファニー
+#   1837メイカーズ（ゴールド中心、約10万円）→ 1837（シルバー中心、約1.5万円）
+#   ダブルロープ（センターノット、約13万円）→ ラブノット（フック&アイ、約2万円）→ ノット
+# 「ハードウエア風」「Tiffany風」「〜似」等の類似品はモデル名として扱わない（_TF_NF / _TF_NOT_LIKE）。
+# 売却済みが1〜2件で相場の付かない名前（Tスクエア・Tフープ・Tナロー・ティファニーロック・オーバルタグ・
+# ボーンカフ・グラフィティ・ミルグレイン等）と、売却済みに見当たらない名前（ドッツ・エンチャント・
+# ジャズ・ジッパー・アトラスX）は入れていない。
+_TF_NF = r'(?!\s*(?:風|似|タイプ))'                       # 類似品（ハードウエア風 等）を除く
+_TF_NOT_LIKE = r'(?s)^(?!.*(?:ティファニー|TIFFANY)\s*(?:風|似))'   # 「Tiffany風 スマイルピアス」等
+# シルバー・コンビ・ヴィンテージ等の語（現行のゴールドのノットと、昔のシルバーのノットを分ける）
+_TF_VINTAGE = (r'(?:925|' + _A + r'(?:SV|SILVER|VINTAGE|OLD)' + _Z
+               + r'|シルバー|コンビ|[ヴビ]ィ?ンテージ|オールド|ケルティック|ツイスト|パロマ)')
+_TF_HW = (r'(?s)^(?=.*(?:ハードウ[ェエ]ア|' + _A + r'HARD\s*WEAR' + _Z + r')' + _TF_NF + r').*?')
+_TF_RTT = r'(?s)^(?=.*(?:リターン\s*トゥ|' + _A + r'(?:RETURN\s*TO|RTT)' + _Z + r')).*?'
+_TF_ITEM = r'(?=\s*(?:十字|ネックレス|ペンダント|ピアス|イヤリング|リング|トップ|チャーム|ブレス|バングル))'
+
+
+def _tf(canon: str, en: str, kana: str, eng: str, cond: str = "",
+        extra: list[str] | None = None) -> list[tuple[str, str, list[str]]]:
+    """ティファニーのモデル。kana / eng: 正規表現（英字は前後に英字が続かないこと）。
+    cond: タイトル全体の条件（ハードウェアのサブライン等）。extra: 追加の正規表現"""
+    pats = [cond + r'(?:' + kana + r')' + _TF_NF,
+            cond + _A + r'(?:' + eng + r')' + _Z + _TF_NF] + (extra or [])
+    # 類似品（ブランド名の直後に「風」「似」）は除く。条件は先読みなので照合位置は変わらない
+    return [(canon, en, [_TF_NOT_LIKE + r'(?=.*?(?:' + p.removeprefix('(?s)') + r'))' for p in pats])]
+
+
+_TIFFANY_MODELS: list[tuple[str, str, list[str]]] = [
+    # ── ティファニー T（売却済み中央値 12万〜23万円）──
+    *_tf("Tワイヤー", "T WIRE",                                                                       # 81件
+         _A + r'T\s*(?:ダイヤ(?:モンド)?\s*|ナロー\s*)?ワイヤー|ティー\s*ワイヤー|ナロー\s*ワイヤー',
+         r'T\s*WIRE'),
+    *_tf("Tワン", "T ONE", _A + r'T\s*ワン(?!ピース|ポイント)|ティー\s*ワン', r'T\s*ONE',                             # 17件
+         # 「T1」は後ろにリング・ナロー等が続くときだけ（末尾の管理番号「…SV925 T1」を除く）
+         extra=[r'(?<![A-Za-z0-9])T\s*-?\s*1(?!\d)(?=\s*(?:ナロー|ワイド|リング|バングル|フープ|ピアス'
+                r'|ネックレス|ブレス|ダイヤ|ペンダント|RING|NARROW|WIDE))', r'^T\s*-?\s*1$']),
+    *_tf("Tトゥルー", "T TRUE", _A + r'T\s*トゥルー', r'T\s*TRUE'),                                    # 3件
+    *_tf("Tスマイル", "T SMILE", r'(?:(?<![ァ-ヶー])|(?<=ティファニー))スマイル|ティー\s*スマイル', r'T?\s*SMILE'),          # 79件（T の付かない「スマイル」も T スマイル）
+    # ── ハードウェア（ボール 2〜4万 / マイクロ 7〜14万 / スモール 13〜26万 / ラージ 15〜24万円）──
+    *_tf("ハードウェアボール", "HARDWEAR BALL", r'ボール', r'BALL', cond=_TF_HW),                       # 6件
+    # マイクロリンク・スモールリンクはハードウェアの語が無くてもハードウェア（他のラインに無い名前）
+    *_tf("ハードウェアマイクロリンク", "HARDWEAR MICRO LINK", r'マイクロ', r'MICRO', cond=_TF_HW,       # 10件
+         extra=[r'マイクロ\s*リンク', _A + r'MICRO\s*LINK']),
+    *_tf("ハードウェアスモールリンク", "HARDWEAR SMALL LINK", r'スモール', r'SMALL', cond=_TF_HW,      # 21件
+         extra=[r'スモール\s*リンク', _A + r'SMALL\s*LINK']),
+    *_tf("ハードウェアラージリンク", "HARDWEAR LARGE LINK",                                           # 14件
+         r'ラージ\s*(?:ダブル\s*)?リンク|エクストラ\s*ラージ|グラジュエイテッド|ダブル\s*リンク',
+         r'LARGE\s*LINK|EXTRA\s*LARGE|GRADUATED|DOUBLE\s*LINK', cond=_TF_HW),
+    *_tf("ハードウェア", "HARDWEAR", r'ハードウ[ェエ]ア', r'HARD\s*WEAR'),                             # 12件
+    # ── ビクトリア（ダイヤ。キー・ヴァインも含む。中央値 約40万円）──
+    *_tf("ビクトリア", "VICTORIA", r'[ビヴ]ィ?クトリア(?!\s*(?:シークレット|ズ))', r"VICTORIA(?!'?S)"),  # 77件
+    # ── リターントゥティファニー（タグ・ハート。1〜3万円）──
+    *_tf("ダブルハートタグ", "DOUBLE HEART TAG", r'ダブル\s*ハート\s*タグ', r'DOUBLE\s*HEART\s*TAG',  # 15件
+         # リターントゥのダブルハート、またはダイヤ・ゴールドでない「ダブルハート」（シルバーのタグ）
+         extra=[_TF_RTT + r'ダブル\s*ハート',
+                r'(?s)^(?!.*(?:ダイヤ|' + _A + r'(?:PT|K18|DIAMOND)|プラチナ|750|ゴールド)).*?ダブル\s*ハート']),
+    *_tf("ハートタグ", "HEART TAG", r'ハート\s*タグ', r'HEART\s*TAG'),                                # 19件
+    *_tf("リターントゥティファニー", "RETURN TO TIFFANY", r'リターン\s*トゥ',                          # 24件
+         r'RETURN\s*TO(?:\s*TIFFANY)?|RTT'),
+    # ── ティファニーキー（ハートキー・ラウンドキー・ピアスドキー等。キーリング・キーホルダーは除く）──
+    *_tf("ティファニーキー", "TIFFANY KEYS",                                                          # 10件
+         r'(?:(?<![ァ-ヶー])|(?<=ハート)|(?<=ラウンド)|(?<=オーバル)|(?<=デイジー)|(?<=ティファニー))'
+         r'キー(?!\s*(?:ホルダー|リング|チェーン|ケース|カバー))',
+         r'KEYS?(?!\s*(?:RING|HOLDER|CHAIN))'),
+    # ── 1837（メイカーズはゴールド中心で相場が別）──
+    *_tf("1837メイカーズ", "1837 MAKERS", r'メ[イー]カーズ', r'MAKERS'),                                # 7件
+    *_tf("1837", "1837", r'(?<!\d)1837(?!\d)', r'1837'),                                              # 87件
+    # ── エルサ・ペレッティ ──
+    *_tf("オープンハート", "OPEN HEART", r'オープン\s*ハート', r'OPEN\s*HEART'),                        # 92件
+    *_tf("ビーン", "BEAN", r'ビーン(?!ズ?\s*ライター)', r'BEANS?'),                                    # 84件
+    *_tf("ティアドロップ", "TEARDROP", r'ティア\s*ー?\s*ドロップ', r'TEAR\s*DROP'),                    # 16件
+    *_tf("フルハート", "FULL HEART", r'フル\s*ハート', r'FULL\s*HEART'),                              # 7件
+    *_tf("バイザヤード", "BY THE YARD", r'バイ\s*(?:ザ\s*ヤ|ヤ\s*ザ)ード', r'BY\s*THE\s*YARD'),                   # 64件
+    *_tf("エターナルサークル", "ETERNAL CIRCLE", r'エターナル\s*サークル', r'ETERNAL\s*CIRCLE'),       # 6件
+    *_tf("スネーク", "SNAKE", r'スネーク(?!\s*チェーン)', r'SNAKE(?!\s*CHAIN)'),                      # 4件（チェーンの種類を除く）
+    *_tf("スターオブダビデ", "STAR OF DAVID", r'ダビデ', r'STAR\s*OF\s*DAVID'),                       # 3件
+    # ── パロマ・ピカソ ──
+    *_tf("ラビングハート", "LOVING HEART", r'ラ[ビヴ]ィ?ング\s*ハート', r'LOVING\s*HEART'),                  # 41件
+    *_tf("オリーブリーフ", "OLIVE LEAF", r'オリーブ\s*リーフ', r'OLIVE\s*LEAF'),                      # 7件
+    *_tf("キス", "KISS", r'(?<![ァ-ヶー])キス(?![ァ-ヶー])', r'KISS'),                                # 11件（X キス・グラフィティ キス）
+    *_tf("グルーブド", "GROOVED", r'グルー[ブヴ]', r'GROOVED?'),                                       # 6件（パロマ グルーブを含む）
+    *_tf("シグネチャー", "SIGNATURE", r'シグネチャー?', r'SIGNATURE'),                                # 17件
+    # ── ノット（ダブルロープ → ラブノット → その他のノット）──
+    *_tf("ダブルロープ", "DOUBLE ROPE", r'ダブル\s*ロープ|センター\s*ノット', r'DOUBLE\s*ROPE|CENTER\s*KNOT'),  # 11件
+    *_tf("ラブノット", "LOVE KNOT",                                                                   # 59件
+         r'ラブ\s*ノット|フック\s*(?:&|アンド|and)?\s*アイ', r'LOVE\s*KNOT|HOOK\s*(?:&|AND)?\s*EYE'),
+    *_tf("サマセット", "SOMERSET", r'サマセット', r'SOMERSET'),                                        # 15件
+    # ノットは現行のティファニー ノット（ゴールド・ダイヤ、14万〜63万円）だけ。シルバー・コンビ・ヴィンテージの
+    # 「ノット リング」等（1万〜4万円の別物）は除く
+    *_tf("ケルティックノット", "CELTIC KNOT", r'ケルティック', r'CELTIC'),                            # 4件
+    *_tf("ノット", "KNOT", r'(?:(?<![ァ-ヶー])|(?<=ティファニー))ノット', r'KNOT', cond=r'(?s)^(?!.*' + _TF_VINTAGE + r').*?'),  # 7件
+    # ── その他の定番 ──
+    *_tf("アトラス", "ATLAS", r'アトラス', r'ATLAS'),                                                 # 99件
+    *_tf("インフィニティ", "INFINITY", r'インフィニティ', r'INFINITY'),                                # 12件
+    *_tf("バンブー", "BAMBOO", r'バンブー', r'BAMBOO'),                                               # 19件
+    *_tf("ベネチアン", "VENETIAN", r'[ベヴ]ェ?ネチアン', r'VENETIAN'),                                 # 19件
+    *_tf("カデナ", "PADLOCK", r'カデナ|パドロック|ハート\s*ロック', r'PADLOCK|HEART\s*LOCK'),           # 12件
+    *_tf("インターロッキングサークル", "INTERLOCKING CIRCLES", r'インターロッキング', r'INTERLOCKING'),  # 5件
+    *_tf("リボン", "BOW", r'リボン(?!\s*(?:付|レイ))', r'BOW',                                          # 10件
+         cond=r'(?s)^(?!.*(?:ケース|空箱|ギフトボックス)).*?'),          # 箱・ケースのリボンを除く
+    *_tf("トグル", "TOGGLE", r'トグル', r'TOGGLE'),                                                   # 4件
+    *_tf("ノーツ", "NOTES", r'(?<![ァ-ヶー])ノーツ', r'NOTES'),                                       # 5件
+    *_tf("ナイフエッジ", "KNIFE EDGE", r'ナイフ\s*エッジ', r'KNIFE\s*EDGE'),                          # 2件
+    *_tf("オープンウェーブ", "OPEN WAVE", r'オープン\s*ウェーブ', r'OPEN\s*WAVE'),                    # 3件
+    *_tf("バンドウィズ", "BAND WITH", r'バンド\s*ウィズ', r'BAND\s*WITH'),                            # 3件
+    *_tf("フォージ", "FORGE", r'フォージ', r'FORGE'),                                                 # 3件
+    *_tf("ダイアゴナル", "DIAGONAL", r'ダイアゴナル', r'DIAGONAL'),                                    # 6件
+    *_tf("トリプルスター", "TRIPLE STAR", r'トリプル\s*スター', r'TRIPLE\s*STAR'),                    # 4件
+    *_tf("センチメンタルハート", "SENTIMENTAL HEART", r'センチメンタル\s*ハート', r'SENTIMENTAL\s*HEART'),  # 2件
+    *_tf("カーブドバンド", "CURVED BAND", r'カーブド\s*バンド', r'CURVED\s*BAND'),                    # 3件
+    *_tf("ハーモニー", "HARMONY", r'ハーモニー', r'HARMONY'),                                         # 4件
+    *_tf("セッティング", "SETTING", r'セッティング', r'SETTING'),                                     # 5件
+    *_tf("ソリテール", "SOLITAIRE", r'ソリ(?:テール|ティア|テア|テイル)', r'SOLITAIRE'),               # 11件
+    # クロスは「クロス ネックレス」「オープン クロス」等の形だけ（クロス付き=磨き布、クロスステッチ等を除く）
+    *_tf("クロス", "CROSS", r'(?<!バード)クロス(?!\s*ステッチ)' + _TF_ITEM + r'|オープン\s*クロス|^クロス$',  # 7件
+         r'CROSS(?=\s*(?:NECKLACE|PENDANT|RING|EARRING))|^CROSS$'),
+]
+_STRICT_MODELS["ティファニー"] = [(name, pats) for name, _en, pats in _TIFFANY_MODELS]
+_STRICT_EN.update({name: en for name, en, _pats in _TIFFANY_MODELS})
+
 # モデル名の照合をこのジャンルに限るブランド（ルイヴィトンのサングラスにバッグのモデル名を使わない）
 _NAME_CATEGORIES = {"ルイヴィトン": "バッグ"}
 # モデル名の照合前に全角英数字等を整える（NFKC）ブランド
-_NFKC_NAME_BRANDS = {"ルイヴィトン"}
+_NFKC_NAME_BRANDS = {"ルイヴィトン", "ティファニー"}
 
 for _brand, _models in _STRICT_MODELS.items():
     _MODEL_NAMES[_brand] = [x for _name, _ in _models for x in (_name, _STRICT_EN[_name])]
