@@ -300,16 +300,24 @@ def build_plan(req: dict, cfg: dict) -> list[tuple[dict, str | None]]:
                 continue
             c = copy.deepcopy(kw)
             # 型番はブランド名と組み合わせて1本で検索。モデル名は
-            #   カタカナ名: 元のキーワード + カタカナ名（例: デュベティカ ダウン ディオニシオ）
-            #   英字名:     ブランド名 + 英字名      （例: デュベティカ DIONISIO）
+            #   カタカナ名: ブランド名 + カタカナ名（例: ティファニー ハードウェア）
+            #   英字名:     ブランド名 + 英字名      （例: ティファニー HARDWEAR）
             # の2本で検索する（英字だけのタイトルの出品も拾うため）。ラクマ・ヤフオクは
             # デュベティカ/DUVETICA 等のブランド名を同一視して検索するので、英字側の
-            # ブランド名はカタカナのままでよく、ジャンル語（ダウン等）を付けない方が多く拾える。
+            # ブランド名はカタカナのままでよい。ジャンル語（ジュエリー・バッグ等）は出品タイトルに
+            # 入らないことが多く、付けると0件になりやすいので付けない（ジャンルの絞り込みは
+            # required_words / exclude_words の照合で行う）。
+            # ただし同じブランドの複数ジャンルで使えるモデル名（例: 時計とジュエリー両方に
+            # キーワードがあるブランドのモデル名）は、ジャンルごとの検索を区別するため
+            # 元のキーワード + カタカナ名（例: カルティエ 時計 サントス）のままにする。
             if _is_number(m, brand):
                 c["name"] = f"{brand} {m}"
             else:
                 names = model_extractor.search_names(m, brand)
-                c["name"] = f"{kw['name']} {names[0]}"
+                fits = [k for k in cfg["keywords"] if _brand_of(k) == brand
+                        and model_extractor.name_fits(m, brand, _cat(k.get("category", "") or "その他"))]
+                head = brand if len(fits) <= 1 else kw["name"]
+                c["name"] = f"{head} {names[0]}"
                 if len(names) > 1:
                     c["search_queries"] = [c["name"]] + [f"{brand} {n}" for n in names[1:]]
             c["brand_name"] = brand
