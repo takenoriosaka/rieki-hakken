@@ -7,8 +7,10 @@ Yahoo!オークション スクレイパー
   - data-auction-buynowprice を優先取得し、次点で data-auction-price を使用
 """
 
+import json
 import re
 import time
+from datetime import datetime
 
 import requests
 from bs4 import BeautifulSoup
@@ -155,7 +157,16 @@ def _build_query(keyword: str, exclude_words: list[str] | None) -> str:
     return f"{keyword} {exclusions}"
 
 
+_AUCTION_URL = "https://auctions.yahoo.co.jp/jp/auction/{}"
+
+
 def _parse_results(html: str, max_price: int) -> list[Item]:
+    # 2026-10 中旬頃から検索結果ページが Next.js 化され、HTML に li.Product が無くなった
+    # （商品一覧はクライアント側で描画され、__NEXT_DATA__ の JSON にだけ入っている）。
+    # JSON を一次ソースにし、取れなければ旧 HTML 構造（li.Product）にフォールバックする。
+    items = _parse_next_data(html, max_price)
+    if items is not None:
+        return items
     soup = BeautifulSoup(html, "lxml")
     items = []
     for li in soup.select("li.Product"):
@@ -163,6 +174,95 @@ def _parse_results(html: str, max_price: int) -> list[Item]:
         if item:
             items.append(item)
     return items
+
+
+def _parse_next_data(html: str, max_price: int) -> list[Item] | None:
+    """__NEXT_DATA__ から商品一覧を取り出す。JSON が無い・形が違う場合は None。"""
+    m = re.search(
+        r'<script[^>]*id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.S
+    )
+    if not m:
+        return None
+    try:
+        data = json.loads(m.group(1))
+    except ValueError:
+        return None
+    raw = None
+    for root in (data.get("props", {}).get("pageProps", {}), data.get("props", {})):
+        try:
+            raw = root["initialState"]["search"]["items"]["listing"]["items"]
+            break
+        except (KeyError, TypeError):
+            continue
+    if not isinstance(raw, list):
+        return None
+    items = []
+    for d in raw:
+        if isinstance(d, dict):
+            item = _parse_json_item(d, max_price)
+            if item:
+                items.append(item)
+    return items
+
+
+def _to_int(v) -> int | None:
+    if isinstance(v, bool) or v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return int(v)
+    if isinstance(v, str) and v.isdigit():
+        return int(v)
+    return None
+
+
+def _parse_json_item(d: dict, max_price: int):
+    auction_id = str(d.get("auctionId") or "").strip()
+    title = str(d.get("title") or "").strip()
+    if not auction_id or not title:
+        return None
+    url = _AUCTION_URL.format(auction_id)
+
+    # 旧 HTML 版と同じく、即決価格があればそちらを優先、無ければ現在価格
+    buynow = _to_int(d.get("buyNowPrice"))
+    current = _to_int(d.get("price"))
+    has_buynow = buynow is not None and buynow > 0
+    if has_buynow:
+        price = buynow
+    elif current is not None and current > 0:
+        price = current
+    else:
+        return None
+    if price > max_price:
+        return None
+
+    image_url = d.get("imageUrl") or None
+
+    # 終了時刻（UNIX秒）: endTime は "2026-10-27T22:01:19+09:00" 形式。
+    # 取れなければ etc 内の etm=<UNIX秒> を使う
+    end_time = None
+    et = d.get("endTime")
+    if isinstance(et, str) and et:
+        try:
+            end_time = int(datetime.fromisoformat(et).timestamp())
+        except ValueError:
+            end_time = None
+    if end_time is None:
+        em = re.search(r"(?:^|,)etm=(\d+)", str(d.get("etc") or ""))
+        if em:
+            end_time = int(em.group(1))
+
+    is_flea = bool(d.get("isFleamarketItem"))
+    is_auction = not has_buynow and not is_flea
+
+    return Item(
+        title=title,
+        price=price,
+        url=url,
+        source="yahoo_auctions",
+        image_url=image_url,
+        end_time=end_time,
+        is_auction=is_auction,
+    )
 
 
 def _parse_product(li, max_price: int):
