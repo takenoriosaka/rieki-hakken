@@ -92,9 +92,32 @@ def get_cheap_listings(
         exclude_words: 除外キーワードリスト（例: ["保存袋", "ショッパー"]）
         immediate_only: 現在未使用（aucminprice で同等効果を実現）
     """
-    # 除外キーワードを検索クエリに付加（例: "グッチ バッグ -保存袋 -紙袋"）
+    # 除外キーワードを検索クエリに付加（例: "グッチ バッグ -保存袋 -紙袋"）。
+    # 検索語が長すぎるとヤフオクは 404 を返すため、付けるのは上限文字数に収まる分だけ。
+    # 除外語は全件、取得後のタイトル照合で必ず適用する（_filter_excluded）。
     search_query = _build_query(keyword, exclude_words)
 
+    try:
+        items = _fetch(search_query, max_price, min_price, count)
+    except requests.HTTPError as e:
+        # 保険: 404 のときは除外語を外したクエリで1回だけ取り直す（除外は取得後の照合で効く）
+        status = e.response.status_code if e.response is not None else None
+        if status != 404 or search_query == keyword:
+            print(f"[Yahoo Auctions] 取得エラー ({keyword}): {e}")
+            return []
+        print(f"[Yahoo Auctions] 検索語が長すぎて 404 → 除外語なしで再取得 ({keyword})")
+        try:
+            items = _fetch(keyword, max_price, min_price, count)
+        except Exception as e2:
+            print(f"[Yahoo Auctions] 取得エラー ({keyword}): {e2}")
+            return []
+    except Exception as e:
+        print(f"[Yahoo Auctions] 取得エラー ({keyword}): {e}")
+        return []
+    return _filter_excluded(items, exclude_words)[:count]
+
+
+def _fetch(search_query: str, max_price: int, min_price: int, count: int) -> list[Item]:
     params = {
         "p":           search_query,
         "va":          search_query,
@@ -109,12 +132,8 @@ def get_cheap_listings(
     if min_price > 0:
         params["aucminprice"] = min_price
 
-    try:
-        resp = _get(_SEARCH_URL, params=params)
-        return _parse_results(resp.text, max_price)[:count]
-    except Exception as e:
-        print(f"[Yahoo Auctions] 取得エラー ({keyword}): {e}")
-        return []
+    resp = _get(_SEARCH_URL, params=params)
+    return _parse_results(resp.text, max_price)
 
 
 def get_description(url: str) -> str | None:
@@ -149,12 +168,32 @@ def is_ended(url: str) -> bool:
         return False
 
 
+# 検索語（p）の文字数上限。2026-10 にログインなしで実測: 除外語付きで 398 文字は 200、
+# 404 文字は 404（URL全体の長さや語数ではなく検索語の文字数で決まる）。余裕を持たせて 300 文字。
+_MAX_QUERY_CHARS = 300
+
+
 def _build_query(keyword: str, exclude_words: list[str] | None) -> str:
-    """除外キーワードを付加した検索クエリを生成する。"""
-    if not exclude_words:
-        return keyword
-    exclusions = " ".join(f"-{w}" for w in exclude_words)
-    return f"{keyword} {exclusions}"
+    """除外キーワードを付加した検索クエリを生成する。
+
+    除外語は config の並び順（先頭から）に、検索語全体が _MAX_QUERY_CHARS 文字に
+    収まる分だけ付ける。付けきれなかった除外語も _filter_excluded で取得後に除外される。
+    """
+    query = keyword
+    for w in exclude_words or []:
+        nxt = f"{query} -{w}"
+        if len(nxt) > _MAX_QUERY_CHARS:
+            break
+        query = nxt
+    return query
+
+
+def _filter_excluded(items: list[Item], exclude_words: list[str] | None) -> list[Item]:
+    """タイトルに除外語を含む商品を除く（他の仕入れ先と同じ、大文字小文字を区別しない部分一致）。"""
+    ex_lower = [w.lower() for w in exclude_words] if exclude_words else []
+    if not ex_lower:
+        return items
+    return [it for it in items if not any(w in it.title.lower() for w in ex_lower)]
 
 
 _AUCTION_URL = "https://auctions.yahoo.co.jp/jp/auction/{}"
