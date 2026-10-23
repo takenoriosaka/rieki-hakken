@@ -15,6 +15,7 @@ from datetime import datetime
 import requests
 from bs4 import BeautifulSoup
 from models import Item
+from scrapers import yahoo_flea_market
 
 _SEARCH_URL = "https://auctions.yahoo.co.jp/search/search"
 
@@ -145,7 +146,11 @@ def get_description(url: str) -> str | None:
     item.descriptionHtml（出品者が書いたHTML）にあるので、そこからタグを除いたテキストを返す。
     ログインなしの requests で取得できることを確認済み（2026-10時点）。
     旧形式のページ（__NEXT_DATA__ が無い・構造が違う）は従来どおり #description から取る。
+    Yahoo!フリマ出品のURL（旧形式で保存されたヤフオクURLを含む）は yahoo_flea_market で取る。
     """
+    url = to_item_url(url)
+    if yahoo_flea_market.is_item_url(url):
+        return yahoo_flea_market.get_description(url)
     try:
         resp = _get(url)
         _remember_images(url, resp.text)
@@ -183,6 +188,9 @@ def get_image_urls(url: str) -> list[str] | None:
     写真は __NEXT_DATA__ の props.pageProps.initialState.item.detail.item.img[].image
     （原寸。i-img900x1200-… 等）にある。ログインなしの requests で取得できることを確認済み（2026-10時点）。
     """
+    url = to_item_url(url)
+    if yahoo_flea_market.is_item_url(url):
+        return yahoo_flea_market.get_image_urls(url)
     if url in _image_urls:
         return _image_urls.pop(url)
     try:
@@ -234,14 +242,36 @@ _ENDED_TEXT = "このオークションは終了しています"
 
 
 def is_ended(url: str) -> bool:
-    """ヤフオクの商品ページを取得し、オークションが終了しているか判定する。取得失敗時は False（表示は継続）を返す。"""
+    """ヤフオクの商品ページを取得し、オークションが終了しているか判定する。取得失敗時は False（表示は継続）を返す。
+
+    - Yahoo!フリマの商品URL（検索結果に混ざるフリマ出品）は yahoo_flea_market.is_ended で判定する。
+    - 旧形式で保存された z〜 の出品（ヤフオクのURLにしていた Yahoo!フリマ出品）は
+      Yahoo!フリマのURLに直してから判定する。
+    - 404（ページが無い＝削除済み・取り消し）は購入できないので終了扱い（404 のURLを出し続けない）。
+    """
+    url = to_item_url(url)
+    if yahoo_flea_market.is_item_url(url):
+        return yahoo_flea_market.is_ended(url)
     try:
         resp = requests.get(url, headers=_HEADERS, timeout=15)
+        if resp.status_code == 404:
+            return True
         resp.raise_for_status()
         return _ENDED_TEXT in resp.text
     except Exception as e:
         print(f"[Yahoo Auctions] 終了判定エラー ({url}): {e}")
         return False
+
+
+# 旧形式（修正前）で保存された Yahoo!フリマ出品のURL。ヤフオクの出品IDは英字1文字＋数字10桁
+# （例: t1249205314）、Yahoo!フリマは z＋数字9桁（例: z703369578）で、z〜 をヤフオクのURLにすると 404
+_OLD_FLEA_URL_RE = re.compile(r"^https://auctions\.yahoo\.co\.jp/jp/auction/(z\d{9})$")
+
+
+def to_item_url(url: str) -> str:
+    """旧形式で保存された Yahoo!フリマ出品のヤフオクURL（404）を Yahoo!フリマの商品URLに直す。それ以外はそのまま。"""
+    m = _OLD_FLEA_URL_RE.match(url or "")
+    return yahoo_flea_market.item_url(m.group(1)) if m else url
 
 
 # 検索語（p）の文字数上限。2026-10 にログインなしで実測: 除外語付きで 398 文字は 200、
@@ -335,7 +365,20 @@ def _parse_json_item(d: dict, max_price: int):
     title = str(d.get("title") or "").strip()
     if not auction_id or not title:
         return None
-    url = _AUCTION_URL.format(auction_id)
+
+    # ヤフオクの検索結果には Yahoo!フリマ（旧PayPayフリマ）の出品も混ざる
+    # （isFleamarketItem=true / seller.type=FLEAMARKET。ID は z＋数字9桁、例: z703369578）。
+    # これをヤフオクのURL（/jp/auction/z…）にすると 404 で説明文も写真も取れないため、
+    # 検索結果ページのリンクと同じ Yahoo!フリマの商品URLにし、仕入れ先も yahoo_flea にする
+    # （説明文・写真は yahoo_flea_market の取得関数で取れ、Yahoo!フリマ検索の同じ出品とURLで重複除去される）。
+    # 2026-10 にログインなしで確認: ヤフオクURLは 404、Yahoo!フリマURLは説明文・写真とも取得できる
+    seller = d.get("seller") if isinstance(d.get("seller"), dict) else {}
+    seller_type = seller.get("type")
+    is_flea = bool(d.get("isFleamarketItem")) or seller_type == "FLEAMARKET"
+    if is_flea:
+        url = yahoo_flea_market.item_url(auction_id)
+    else:
+        url = _AUCTION_URL.format(auction_id)
 
     # 旧 HTML 版と同じく、即決価格があればそちらを優先、無ければ現在価格
     buynow = _to_int(d.get("buyNowPrice"))
@@ -353,27 +396,28 @@ def _parse_json_item(d: dict, max_price: int):
     image_url = d.get("imageUrl") or None
 
     # 終了時刻（UNIX秒）: endTime は "2026-10-27T22:01:19+09:00" 形式。
-    # 取れなければ etc 内の etm=<UNIX秒> を使う
+    # 取れなければ etc 内の etm=<UNIX秒> を使う。
+    # Yahoo!フリマ出品の endTime は掲載期限（出品から1年後）でオークションの終了ではないので使わない
+    # （Yahoo!フリマ検索の出品と同じく終了時刻なし）
     end_time = None
-    et = d.get("endTime")
+    et = d.get("endTime") if not is_flea else None
     if isinstance(et, str) and et:
         try:
             end_time = int(datetime.fromisoformat(et).timestamp())
         except ValueError:
             end_time = None
-    if end_time is None:
+    if end_time is None and not is_flea:
         em = re.search(r"(?:^|,)etm=(\d+)", str(d.get("etc") or ""))
         if em:
             end_time = int(em.group(1))
 
-    is_flea = bool(d.get("isFleamarketItem"))
     is_auction = not has_buynow and not is_flea
 
     return Item(
         title=title,
         price=price,
         url=url,
-        source="yahoo_auctions",
+        source="yahoo_flea" if is_flea else "yahoo_auctions",
         image_url=image_url,
         end_time=end_time,
         is_auction=is_auction,
@@ -389,7 +433,7 @@ def _parse_product(li, max_price: int):
     if not title:
         return None
 
-    url = a.get("href", "")
+    url = to_item_url(a.get("href", ""))
     if not url:
         return None
 
@@ -427,14 +471,16 @@ def _parse_product(li, max_price: int):
     is_flea = bool(a.get("data-auction-isflea"))
     has_buynow = buynow_attr.isdigit() and int(buynow_attr) > 0
     is_auction = not has_buynow and not is_flea
+    # Yahoo!フリマの出品（リンク先が Yahoo!フリマ）は仕入れ先も yahoo_flea にする（_parse_json_item と同じ）
+    on_flea = yahoo_flea_market.is_item_url(url)
 
     return Item(
         title=title,
         price=price,
         url=url,
-        source="yahoo_auctions",
+        source="yahoo_flea" if on_flea else "yahoo_auctions",
         image_url=image_url,
-        end_time=end_time,
+        end_time=None if on_flea else end_time,
         is_auction=is_auction,
     )
 

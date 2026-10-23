@@ -27,6 +27,19 @@ _HEADERS = {
     "Accept-Encoding": "gzip, deflate, br",
 }
 
+_ITEM_URL = "https://paypayfleamarket.yahoo.co.jp/item/{}"
+
+
+def item_url(item_id: str) -> str:
+    """商品ID（z＋数字9桁、例: z703369578）から商品ページのURLを作る。
+    ヤフオクの検索結果に混ざる Yahoo!フリマ出品（yahoo_auctions）も同じURLにして重複除去を効かせる。"""
+    return _ITEM_URL.format(item_id)
+
+
+def is_item_url(url: str) -> bool:
+    return (url or "").startswith(_ITEM_URL.format(""))
+
+
 _NEXT_DATA_RE = re.compile(
     r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', re.S
 )
@@ -94,6 +107,27 @@ def get_description(url: str) -> str | None:
     except Exception as e:
         print(f"[Yahoo!フリマ] 説明文取得エラー ({url}): {e}")
         return None
+
+
+def is_ended(url: str) -> bool:
+    """商品ページを取得し、もう買えない（売り切れ・公開停止・削除済み）か判定する。取得失敗時は False（表示は継続）。
+
+    商品の状態は __NEXT_DATA__ の item.status（出品中は "OPEN"。2026-10時点で確認）。
+    404（ページが無い）は削除済みとして終了扱い。
+    """
+    try:
+        resp = requests.get(url, headers=_HEADERS, timeout=15)
+        if resp.status_code == 404:
+            return True
+        resp.raise_for_status()
+        item = _item_json(resp.text)
+        status = (item or {}).get("status")
+        if not status:
+            return False   # 構造が想定外なら判定しない（表示は継続）
+        return status != "OPEN"
+    except Exception as e:
+        print(f"[Yahoo!フリマ] 終了判定エラー ({url}): {e}")
+        return False
 
 
 # 説明文の取得時に同じページから取った商品写真のURL（商品URL → 写真URLの一覧）。
@@ -184,7 +218,7 @@ def _parse_item(raw: dict, min_price: int, max_price: int, ex_lower: list[str]):
     item_id = raw.get("id")
     if not item_id:
         return None
-    url = f"https://paypayfleamarket.yahoo.co.jp/item/{item_id}"
+    url = item_url(item_id)
 
     return Item(
         title=title,

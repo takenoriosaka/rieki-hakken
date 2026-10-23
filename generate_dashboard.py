@@ -73,11 +73,15 @@ def main():
 
 
 def _filter_ended_yahoo_auctions(deals: list[dict]) -> list[dict]:
-    """終了済みのヤフオク商品をダッシュボードから除外する（購入不可のため表示しても無意味）。"""
+    """終了済みのヤフオク商品をダッシュボードから除外する（購入不可のため表示しても無意味）。
+    ヤフオク検索に混ざる Yahoo!フリマ出品（仕入れ先 yahoo_flea）と Yahoo!フリマの出品も、
+    売り切れ・削除済みなら除外する（判定は yahoo_auctions.is_ended → yahoo_flea_market.is_ended）。
+    旧形式で保存された Yahoo!フリマ出品のヤフオクURL（404）は Yahoo!フリマのURLに直して表示する。"""
     filtered = []
     excluded_count = 0
     for deal in deals:
-        if deal.get("source") == "yahoo_auctions":
+        if deal.get("source") in ("yahoo_auctions", "yahoo_flea"):
+            deal["url"] = yahoo_auctions.to_item_url(deal.get("url") or "")
             try:
                 ended = yahoo_auctions.is_ended(deal["url"])
             except Exception as e:
@@ -89,7 +93,7 @@ def _filter_ended_yahoo_auctions(deals: list[dict]) -> list[dict]:
                 continue
         filtered.append(deal)
 
-    print(f"終了済みヤフオク商品を除外: {excluded_count}件")
+    print(f"終了済みヤフオク・Yahoo!フリマ商品を除外: {excluded_count}件")
     return filtered
 
 
