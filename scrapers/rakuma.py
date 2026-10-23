@@ -4,6 +4,8 @@
 - 相場算出には使えない（売却済みデータの取得手段がないため、仕入れ候補ソースとしてのみ機能）
 - ページネーションパラメータは未確認のため &page=2 を試行し、
   前ページと重複（新規URLが0件）なら打ち切る設計にしている
+- 売り切れ（SOLD OUT）の出品は仕入れられないので除く。検索URLに transaction=selling
+  （画面の「販売中のみ」チェックと同じ条件）を付け、カード側でも SOLD OUT のリボンを見て二重に除外する
 """
 
 import time
@@ -14,6 +16,10 @@ from bs4 import BeautifulSoup
 from models import Item
 
 _SEARCH_URL = "https://fril.jp/s"
+# 検索画面の「販売中のみ」チェック（サイトのJSが URL に transaction=selling を付ける）。
+# 2026-10 にログインなしで確認: 「タトラス ポリテアマ」で指定なし 599件 → 販売中のみ 89件、
+# 販売中のみの 1〜2ページ目（各40件）に SOLD OUT のリボンは 0件
+_SELLING_ONLY = {"transaction": "selling"}
 _MAX_PAGES = 3
 
 _HEADERS = {
@@ -51,7 +57,7 @@ def get_cheap_listings(
         seen_urls: set[str] = set()
 
         for page in range(1, _MAX_PAGES + 1):
-            params = {"query": keyword}
+            params = {"query": keyword, **_SELLING_ONLY}
             if page > 1:
                 params["page"] = page
             resp = requests.get(_SEARCH_URL, params=params, headers=_HEADERS, timeout=15)
@@ -101,6 +107,31 @@ def get_description(url: str) -> str | None:
         return None
 
 
+# 商品ページの在庫状態。2026-10 にログインなしで売り切れ・販売中のページを取得して確認済み:
+#   - 売り切れ: <meta property="product:availability" content="out of stock">
+#               （写真に div.photo-box__soldout_ribbon、価格の横に span.soldout "SOLDOUT" も出る）
+#   - 販売中:   content="in stock"（「購入に進む」ボタンあり）
+#   - 削除済み: 404
+_OUT_OF_STOCK = "out of stock"
+
+
+def is_ended(url: str) -> bool:
+    """商品ページを取得し、もう買えない（売り切れ・削除済み）か判定する。取得失敗時は False（表示は継続）。"""
+    try:
+        resp = requests.get(url, headers=_HEADERS, timeout=15)
+        if resp.status_code == 404:
+            return True
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "lxml")
+        meta = soup.select_one('meta[property="product:availability"]')
+        if meta is None:
+            return False   # 構造が想定外なら判定しない（表示は継続）
+        return (meta.get("content") or "").strip().lower() == _OUT_OF_STOCK
+    except Exception as e:
+        print(f"[ラクマ] 売り切れ判定エラー ({url}): {e}")
+        return False
+
+
 # 説明文の取得時に同じページから取った商品写真のURL（商品URL → 写真URLの一覧）。
 # 写真から型番を読む機能（photo_reader）用
 _image_urls: dict[str, list[str]] = {}
@@ -143,6 +174,11 @@ def _parse_page(
 
 
 def _parse_card(div, min_price: int, max_price: int, ex_lower: list[str]):
+    # 売り切れカードは写真に div.item-box__soldout_ribbon（文言 "SOLD OUT"）が付く（2026-10時点で確認）。
+    # 検索URLの transaction=selling で除かれるが、条件が効かなかった場合に備えてここでも除く
+    if div.select_one(".item-box__soldout_ribbon"):
+        return None
+
     a = div.select_one("a.link_search_title")
     if not a:
         return None
