@@ -72,6 +72,34 @@ def get_cheap_listings(
         return []
 
 
+def get_description(url: str) -> str | None:
+    """商品詳細ページから説明文を取得する（タイトルに型番がない場合のフォールバック用）。
+    説明文が空なら ''、取得エラー・ページ構造が想定外なら None（次回再取得）を返す。
+
+    検索ページと同じく __NEXT_DATA__ の JSON にあり、パスは
+    props.initialState.itemsState.items.item.description（2026-10時点で確認）。
+    """
+    try:
+        resp = requests.get(url, headers=_HEADERS, timeout=15)
+        resp.raise_for_status()
+        match = _NEXT_DATA_RE.search(resp.text)
+        if not match:
+            return None
+        item = (
+            json.loads(match.group(1))
+            .get("props", {})
+            .get("initialState", {})
+            .get("itemsState", {})
+            .get("items", {})
+            .get("item", {})
+        )
+        desc = item.get("description")
+        return desc.strip() if isinstance(desc, str) else None
+    except Exception as e:
+        print(f"[Yahoo!フリマ] 説明文取得エラー ({url}): {e}")
+        return None
+
+
 def _extract_items(html: str):
     """__NEXT_DATA__ の JSON から検索結果アイテム一覧を取り出す。構造が想定外なら None を返す。"""
     match = _NEXT_DATA_RE.search(html)

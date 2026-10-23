@@ -79,6 +79,24 @@ def get_cheap_listings(
         return []
 
 
+def get_description(url: str) -> str | None:
+    """商品詳細ページから説明文を取得する（タイトルに型番がない場合のフォールバック用）。
+    説明文が空なら ''、取得エラー・ページ構造が想定外なら None（次回再取得）を返す。
+
+    説明文は div.item__description__line-limited（PC用・スマホ用の2箇所に同じ内容）にある。
+    ログインなしの requests で取得できることを確認済み（2026-10時点）。
+    """
+    try:
+        resp = requests.get(url, headers=_HEADERS, timeout=15)
+        resp.raise_for_status()
+        soup = BeautifulSoup(resp.text, "lxml")
+        el = soup.select_one("div.item__description__line-limited")
+        return el.get_text("\n", strip=True) if el else None
+    except Exception as e:
+        print(f"[ラクマ] 説明文取得エラー ({url}): {e}")
+        return None
+
+
 def _parse_page(
     html: str, min_price: int, max_price: int, ex_lower: list[str]
 ) -> list[Item]:

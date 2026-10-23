@@ -76,6 +76,27 @@ def get_cheap_listings(
         return []
 
 
+def get_description(url: str) -> str | None:
+    """商品詳細ページから説明文を取得する（タイトルに型番がない場合のフォールバック用）。
+    説明文が空なら ''、取得エラー・ページ構造が想定外なら None（次回再取得）を返す。
+
+    ベクトルパークは商品情報表（table.infomation: ブランド・サイズ・素材・状態・備考など）を
+    説明文として扱う（2026-10時点で確認。同じ表が PC用・スマホ用に2つあるので先頭を使う）。
+    Crawl-delay: 10 の間隔は呼び出し側（main.py）で空ける。
+    """
+    try:
+        resp = requests.get(url, headers=_HEADERS, timeout=15)
+        resp.raise_for_status()
+        # 一覧ページと同じく charset が無く ISO-8859-1 と誤判定されるため UTF-8 を明示
+        resp.encoding = "utf-8"
+        soup = BeautifulSoup(resp.text, "lxml")
+        el = soup.select_one("table.infomation")
+        return el.get_text("\n", strip=True) if el else None
+    except Exception as e:
+        print(f"[ベクトルパーク] 説明文取得エラー ({url}): {e}")
+        return None
+
+
 def _parse_page(
     html: str, min_price: int, max_price: int, ex_lower: list[str]
 ) -> list[Item]:

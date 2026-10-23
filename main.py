@@ -33,6 +33,18 @@ CONFIG_PATH = "config.json"
 # 商品説明文キャッシュの有効期限（時間）。説明文は出品後ほぼ変わらないため長めでよい
 DESCRIPTION_CACHE_HOURS = 24 * 7
 
+# requests で1件ずつ説明文を取得する仕入れ先: source → (取得関数, 取得間隔秒)。
+# 取得関数は説明文なしなら ''、取得エラーなら None（キャッシュせず次回再取得）を返す。
+# 間隔は各スクレイパーの一覧取得と同程度（ベクトルパークは robots.txt の Crawl-delay: 10）。
+# メルカリ安値は Playwright でまとめて取得するため別処理（mercari_scraper.get_descriptions）。
+DESCRIPTION_FETCHERS = {
+    "yahoo_auctions": (yahoo_auctions.get_description, 0),
+    "vector_park":    (vector_park.get_description, 10),
+    "trefac":         (trefac_fashion.get_description, 1),
+    "rakuma":         (rakuma.get_description, 1),
+    "yahoo_flea":     (yahoo_flea_market.get_description, 1),
+}
+
 # スキャン統計（説明文。相場取得の統計は analyzer.stats）
 _stats = {"desc_fetched": 0, "desc_cached": 0}
 
@@ -353,7 +365,7 @@ def _scan_keywords(
                 # 説明文は DB にキャッシュし、DESCRIPTION_CACHE_HOURS 以内に取得済みの
                 # 出品は再取得しない（安値順の出品は次回スキャンでも多くが残っているため）
                 target_urls = [it.url for it in pending
-                               if it.source in ("mercari_cheap", "yahoo_auctions")]
+                               if it.source == "mercari_cheap" or it.source in DESCRIPTION_FETCHERS]
                 descriptions = database.get_cached_descriptions(
                     target_urls, max_age_hours=DESCRIPTION_CACHE_HOURS)
                 _stats["desc_cached"] += len(descriptions)
@@ -367,12 +379,21 @@ def _scan_keywords(
                     # 説明文なし('')も記録する。ページ取得エラーの URL は含まれないので次回再取得
                     fetched.update(got)
 
+                last_fetch: dict[str, float] = {}   # source → 前回取得時刻（取得間隔の確保用）
                 for it in pending:
-                    if it.source == "yahoo_auctions" and it.url not in descriptions:
-                        desc = yahoo_auctions.get_description(it.url)
-                        _stats["desc_fetched"] += 1
-                        if desc is not None:
-                            fetched[it.url] = desc
+                    if it.source not in DESCRIPTION_FETCHERS or it.url in descriptions:
+                        continue
+                    if it.url in fetched:
+                        continue  # 同じ出品が重複していても取得は1回
+                    get_description, interval = DESCRIPTION_FETCHERS[it.source]
+                    wait = last_fetch.get(it.source, 0) + interval - time.time()
+                    if wait > 0:
+                        time.sleep(wait)
+                    desc = get_description(it.url)
+                    last_fetch[it.source] = time.time()
+                    _stats["desc_fetched"] += 1
+                    if desc is not None:
+                        fetched[it.url] = desc
 
                 database.cache_descriptions(fetched)
                 descriptions.update(fetched)
