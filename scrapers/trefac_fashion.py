@@ -2,7 +2,8 @@
 トレファクファッション (trefac.jp/store/tcpsb) スクレイパー
 
 - 相場算出には使えない（売却済みデータの取得手段がないため、仕入れ候補ソースとしてのみ機能）
-- 売り切れカード（span.p-itemlist_soldout あり）は価格が取れないためスキップする
+- 検索URLに step=1（画面の「在庫あり」と同じ条件）を付け、売り切れを検索の段階で除く。
+  カード側でも売り切れ（span.p-itemlist_soldout あり）はスキップする（二重の対策）
 """
 
 import re
@@ -15,6 +16,10 @@ from models import Item
 
 _SEARCH_URL = "https://www.trefac.jp/store/tcpsb/"
 _MAX_PAGES = 3  # 1ページあたり約90件取得できるため、通常は1ページで count に達する
+# 検索画面の「在庫あり」。指定なしは「在庫なし含む」（step=all）と同じ件数になり、在庫ありの後ろに
+# 売り切れ（SOLD OUT）が並ぶ。2026-10 にログインなしで確認: 「タトラス」で指定なし 1,286件 → step=1 で 592件、
+# 指定なしの 8ページ目は 90件すべて SOLD OUT、step=1 の最終ページ（7ページ目・52件）に SOLD OUT は 0件
+_IN_STOCK_ONLY = {"step": 1}
 
 _HEADERS = {
     "User-Agent": (
@@ -49,7 +54,7 @@ def get_cheap_listings(
     try:
         items: list[Item] = []
         for page in range(1, _MAX_PAGES + 1):
-            params = {"srchword": keyword}
+            params = {"srchword": keyword, **_IN_STOCK_ONLY}
             if page > 1:
                 params["key"] = page
             resp = requests.get(_SEARCH_URL, params=params, headers=_HEADERS, timeout=15)
@@ -137,7 +142,8 @@ def _parse_page(
 
 
 def _parse_card(li, min_price: int, max_price: int, ex_lower: list[str]):
-    # 売り切れカードは価格が存在しないためスキップ
+    # 売り切れカード（写真に "SOLD OUT" の span.p-itemlist_soldout）はスキップ。
+    # 価格は表示されている（2026-10時点で確認）ので、価格の有無ではなくこの印で判定する
     if li.select_one("span.p-itemlist_soldout"):
         return None
 
