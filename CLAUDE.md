@@ -37,7 +37,15 @@ python generate_dashboard.py --open  # ダッシュボードHTMLだけ再生成�
 - `generate_dashboard.py` - ダッシュボードHTML生成
 - `docs/index.html` - 生成済みダッシュボード（GitHub Pages: `takenoriosaka/rieki-hakken` リポジトリ）
 - `arbitrage.db` - SQLiteキャッシュ・履歴DB（gitignore済み）
-- `.env` - 現在このプロジェクトで必要な環境変数はありません（gitignore済み）
+- `photo_reader.py` - 写真から型番を読む（型番照合で説明文にも型番が無い出品の写真を Claude API で読む。結果は photo_read_cache）
+- `set_api_key.command` - Claude の API キーを `.env` に登録する（ダブルクリック。キー自体は含まない）
+- `.env` - `ANTHROPIC_API_KEY`（写真から型番を読む機能を使うときだけ。gitignore済み。キーを絶対にコミットしないこと）
+
+## 写真から型番を読む機能（2026-10 追加）
+- `.env` に `ANTHROPIC_API_KEY` があり、かつ `.rieki_friend_mode` が無いときだけ動く（それ以外は静かに無効。anthropic も import しない）。
+- 読んだ文字列は必ず `model_extractor.extract()` に通し、型番形式に当てはまるものだけ採用する。
+- 設定は config.json の settings（`photo_read_model` 既定 claude-sonnet-5-5、`photo_read_max_yen_per_scan` 既定 1000円 など）。
+- ローカルの `.git/hooks/pre-commit`（git 管理外）で API キーの文字列（sk-ant… で始まるもの）を含むファイルと `.env` のコミットを止めている。
 
 ## 知り合いとの共有（2026-10 追加）
 - リポジトリ `takenoriosaka/rieki-hakken` は **public** で運用（招待・GitHub アカウントは不要）。個人情報や秘密情報をコミットしないこと。

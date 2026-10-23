@@ -109,9 +109,53 @@ def _playwright_descriptions(page, urls: list[str]) -> dict[str, str]:
             desc = page.evaluate(_EXTRACT_DESCRIPTION_TESTID_JS) or page.evaluate(_EXTRACT_DESCRIPTION_JS)
             # 説明文なしは ''（取得エラーの URL は結果に含めない＝呼び出し側で区別できる）
             results[url] = desc or ""
+            # 同じページの商品写真のURLも控えておく（get_image_urls で再取得せずに使う）
+            imgs = page.evaluate(_EXTRACT_IMAGES_JS)
+            if imgs:
+                _image_urls[url] = list(dict.fromkeys(imgs))
         except Exception as e:
             print(f"[Mercari] 説明文取得エラー ({url}): {e}")
     return results
+
+
+# 説明文の取得時に同じページから取った商品写真のURL（商品URL → 写真URLの一覧）。
+# 写真から型番を読む機能（photo_reader）用
+_image_urls: dict[str, list[str]] = {}
+
+
+def get_image_urls(page, urls: list[str]) -> dict[str, list[str]]:
+    """複数の商品詳細ページから商品写真のURL一覧（掲載順）を取得する。
+    戻り値は {url: [写真URL]}。写真が見つからない・ページ取得エラーの URL は含まない（次回再取得）。
+    説明文の取得で同じページを読んでいればそれを使う。
+    page: 呼び出し元で起動・使い回している Playwright ページ（ログインなし）。
+
+    写真はカルーセル [data-testid="carousel-item"] の img（static.mercdn.net/item/detail/orig/photos/
+    <商品ID>_1.jpg …）。全枚数がはじめから描画されていることを確認済み（2026-10時点）。
+    """
+    results: dict[str, list[str]] = {}
+    for url in urls:
+        if url in _image_urls:
+            results[url] = _image_urls.pop(url)
+            continue
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            try:
+                page.wait_for_selector('[data-testid="carousel-item"] img', timeout=8000)
+            except Exception:
+                pass  # 削除済み・売り切れ等で写真が無いページ
+            imgs = page.evaluate(_EXTRACT_IMAGES_JS)
+            if imgs:
+                results[url] = list(dict.fromkeys(imgs))
+        except Exception as e:
+            print(f"[Mercari] 写真URL取得エラー ({url}): {e}")
+    return results
+
+
+_EXTRACT_IMAGES_JS = """
+() => Array.from(document.querySelectorAll('[data-testid="carousel-item"] img'))
+    .map(img => img.getAttribute('src') || '')
+    .filter(src => src.includes('static.mercdn.net/item/detail/'))
+"""
 
 
 _HAS_DESCRIPTION_JS = """

@@ -1,6 +1,9 @@
 venv/
 *.db
+# APIキー等（set_api_key.command が作る .env）。.env.local 等の派生も含め公開しない
 .env
+.env.*
+!.env.example
 __pycache__/
 *.pyc
 logs/

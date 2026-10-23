@@ -1212,6 +1212,12 @@
     "price_cache_hours": 80,
     "search_items_per_source": 80,
     "notify_hour": 8,
-    "notify_minute": 0
+    "notify_minute": 0,
+    "photo_read_model": "claude-sonnet-5-5",
+    "photo_read_effort": "medium",
+    "photo_read_max_yen_per_scan": 1000,
+    "photo_read_max_images": 20,
+    "photo_read_max_edge": 1568,
+    "photo_read_usd_jpy": 155
   }
 }

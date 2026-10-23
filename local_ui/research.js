@@ -651,6 +651,7 @@ function showProgress(s) {
     $('progressNote').textContent = '';
   }
   updateTimes(s);
+  renderPhotoRead(s.photo_read);
   const box = $('logBox');
   const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 10;
   box.textContent = (s.logs || []).join('\n');
@@ -817,6 +818,20 @@ function renderResults() {
 }
 
 // ── 初期化 ───────────────────────────────────────────────
+// 写真から型番を読む機能の有効/無効（ヘッダーに小さく）と、スキャン中・後の読み取り件数・概算料金（調査中の画面）
+function renderPhotoRead(p) {
+  if (!p) return;
+  $('photoStatus').hidden = false;
+  $('photoStatus').textContent = p.label;
+  const st = p.stats || {};
+  const show = p.enabled && (st.targets || st.api_calls);
+  $('photoStats').hidden = !show;
+  if (show) {
+    $('photoStats').textContent = `📷 写真から型番読み取り：読み取り ${num(st.read)}件（キャッシュ ${num(st.cached)}件）・採用 ${num(st.adopted)}件・API ${num(st.api_calls)}回・概算 ${num(Math.round(st.cost_yen || 0))}円`
+      + (st.stopped ? '（料金上限で停止）' : '');
+  }
+}
+
 async function init() {
   try {
     OPTIONS = await (await fetch('/api/options')).json();
@@ -830,6 +845,7 @@ async function init() {
   let s = null;
   try { s = await (await fetch('/api/status?results=1')).json(); } catch (e) { s = null; }
   if (!s) return;
+  renderPhotoRead(s.photo_read);
   LAST = s;
   if (s.state === 'running') {
     showProgress(s);

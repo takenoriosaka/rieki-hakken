@@ -845,6 +845,53 @@ def uses_description(brand: str) -> bool:
     種別までタイトルで絞るブランド（ヘルノ）は使わない"""
     return brand not in _TITLE_RULES
 
+
+# 写真から品番を読む機能（photo_reader）で Claude に見せる品番の例。
+# 各ブランドの正規表現（_PATTERNS）・ジャンル別の照合（_CATEGORY_EXTRACTORS）のコメントにある実例から選んだもの
+_NUMBER_EXAMPLES: dict = {
+    "IWC": ["IW325101", "IW510101"],
+    "オメガ": ["210.30.42.20.01.001", "2531.80", "311.30.42"],
+    "タグホイヤー": ["CAR2111.BA0724", "CAR2111", "WAY2110"],
+    "カルティエ": ["WSTA0002", "W69009Z3", "CRQZ0020"],
+    "ブライトリング": ["A13356121B1A1", "A17321"],
+    "パネライ": ["PAM00312", "PAM01564"],
+    "レイバン": ["RB2140", "RB2140F", "RB3025"],
+    "グッチ": ["GG0061S"],
+    ("グッチ", "時計"): ["YA126402", "YA1264155", "1500L", "5500M"],
+    ("グッチ", "サングラス"): ["GG0061S", "GG0022S"],
+    "セリーヌ": ["CL40046U"],
+    ("セリーヌ", "サングラス"): ["CL40046U", "CL40034F"],
+    "プラダ": ["SPR17W", "SPR06W"],
+    "ルイヴィトン": ["Z1502W"],
+    ("ルイヴィトン", "バッグ"): ["M40995", "N41358", "M41526"],
+    "シャネル": ["5380", "CH5380"],
+    "オークリー": ["OO9102"],
+    "トムフォード": ["TF237", "TF5401"],
+    "バーバリー": ["BE4216"],
+    "クリスチャンディオール": ["CD3182S", "0175S"],
+    "カナダグース": ["2409L", "3426M"],
+    "ピレネックス": ["HMS011", "HWY012", "HMI055"],
+    "タトラス": ["LTA13A4301", "MTA15S4468", "MTK20A4201", "MTAT21A4754-D", "LTA2BM4694", "MTA-460-12"],
+    "ノースフェイス": ["ND91950", "NDW91952", "NP62130"],
+}
+
+
+def has_number_format(brand: str, category: str = "") -> bool:
+    """正規表現・ジャンル別の照合で型番（品番）を判定できるブランドか（写真からの品番読み取りの対象）。
+    モデル名だけで照合するブランド（モンクレール等）は False"""
+    return (brand, category) in _CATEGORY_EXTRACTORS or bool(_PATTERNS.get(brand))
+
+
+def is_number(model: str | None, brand: str) -> bool:
+    """extract() の結果が型番（品番）か。モデル名（ポリテアマ・スピーディ30 等）なら False"""
+    return bool(model) and extract_name(model, brand) != model
+
+
+def number_examples(brand: str, category: str = "") -> list[str]:
+    """写真から品番を読むときに Claude に見せる、このブランドの品番の例"""
+    return (_NUMBER_EXAMPLES.get((brand, category)) or _NUMBER_EXAMPLES.get(brand)
+            or KNOWN_MODEL_NUMBERS.get(brand, [])[:5])
+
 # レイバンの代表型番（型番 → 愛称）。並びは画面の表示順（相場の高さ・売却件数の多い順）
 _RAYBAN_MODELS.update({
     "RB4264": "",

@@ -90,11 +90,44 @@ def get_description(url: str) -> str | None:
         resp = requests.get(url, headers=_HEADERS, timeout=15)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "lxml")
+        # 同じページの商品写真のURLも控えておく（get_image_urls で再取得せずに使う）
+        imgs = _parse_images(soup)
+        if imgs:
+            _image_urls[url] = imgs
         el = soup.select_one("div.item__description__line-limited")
         return el.get_text("\n", strip=True) if el else None
     except Exception as e:
         print(f"[ラクマ] 説明文取得エラー ({url}): {e}")
         return None
+
+
+# 説明文の取得時に同じページから取った商品写真のURL（商品URL → 写真URLの一覧）。
+# 写真から型番を読む機能（photo_reader）用
+_image_urls: dict[str, list[str]] = {}
+
+
+def get_image_urls(url: str) -> list[str] | None:
+    """商品写真のURL一覧（掲載順）を返す。説明文の取得で同じページを読んでいればそれを使う。
+    取得エラー・ページ構造が想定外なら None。
+
+    写真はスライダーの img.sp-image（img.fril.jp/img/<商品>/l/… の大きい画像）にある。
+    ログインなしの requests で取得できることを確認済み（2026-10時点）。
+    """
+    if url in _image_urls:
+        return _image_urls.pop(url)
+    try:
+        resp = requests.get(url, headers=_HEADERS, timeout=15)
+        resp.raise_for_status()
+        return _parse_images(BeautifulSoup(resp.text, "lxml"))
+    except Exception as e:
+        print(f"[ラクマ] 写真URL取得エラー ({url}): {e}")
+        return None
+
+
+def _parse_images(soup) -> list[str] | None:
+    urls = [im.get("src") or im.get("data-src") or "" for im in soup.select("img.sp-image")]
+    urls = [u for u in urls if u.startswith("http")]
+    return list(dict.fromkeys(urls)) or None
 
 
 def _parse_page(

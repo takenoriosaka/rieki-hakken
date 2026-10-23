@@ -90,11 +90,45 @@ def get_description(url: str) -> str | None:
         # 一覧ページと同じく charset が無く ISO-8859-1 と誤判定されるため UTF-8 を明示
         resp.encoding = "utf-8"
         soup = BeautifulSoup(resp.text, "lxml")
+        # 同じページの商品写真のURLも控えておく（get_image_urls で再取得せずに使う）
+        imgs = _parse_images(soup)
+        if imgs:
+            _image_urls[url] = imgs
         el = soup.select_one("table.infomation")
         return el.get_text("\n", strip=True) if el else None
     except Exception as e:
         print(f"[ベクトルパーク] 説明文取得エラー ({url}): {e}")
         return None
+
+
+# 説明文の取得時に同じページから取った商品写真のURL（商品URL → 写真URLの一覧）。
+# 写真から型番を読む機能（photo_reader）用
+_image_urls: dict[str, list[str]] = {}
+
+
+def get_image_urls(url: str) -> list[str] | None:
+    """商品写真のURL一覧（掲載順）を返す。説明文の取得で同じページを読んでいればそれを使う。
+    取得エラー・ページ構造が想定外なら None。Crawl-delay: 10 の間隔は呼び出し側（main.py）で空ける。
+
+    写真は a.thickbox.not_opacity の href（image.vector-park.jp/images/item/original2/… の原寸）。
+    ログインなしの requests で取得できることを確認済み（2026-10時点）。
+    """
+    if url in _image_urls:
+        return _image_urls.pop(url)
+    try:
+        resp = requests.get(url, headers=_HEADERS, timeout=15)
+        resp.raise_for_status()
+        resp.encoding = "utf-8"
+        return _parse_images(BeautifulSoup(resp.text, "lxml"))
+    except Exception as e:
+        print(f"[ベクトルパーク] 写真URL取得エラー ({url}): {e}")
+        return None
+
+
+def _parse_images(soup) -> list[str] | None:
+    urls = [a.get("href") or "" for a in soup.select("a.thickbox.not_opacity")]
+    urls = [u for u in urls if u.startswith("http") and "/original" in u]
+    return list(dict.fromkeys(urls)) or None
 
 
 def _parse_page(

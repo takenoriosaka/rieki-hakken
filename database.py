@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from datetime import datetime, timedelta
 from typing import Optional
@@ -26,6 +27,15 @@ def init_db():
                 url         TEXT PRIMARY KEY,
                 description TEXT NOT NULL,
                 fetched_at  TEXT NOT NULL
+            );
+
+            -- 写真から読んだ品番のキャッシュ（説明文でも型番が取れなかった出品。photo_reader）
+            -- texts は Claude が写真から読んだ品番の文字列の JSON 配列。'[]' は「読めなかった」
+            CREATE TABLE IF NOT EXISTS photo_read_cache (
+                url        TEXT PRIMARY KEY,
+                texts      TEXT NOT NULL,
+                model      TEXT NOT NULL DEFAULT '',
+                fetched_at TEXT NOT NULL
             );
 
             -- 生徒ごとの配信済み案件（競合防止・重複防止）
@@ -163,6 +173,49 @@ def cache_descriptions(descriptions: dict[str, str]) -> None:
         conn.execute(
             "DELETE FROM description_cache WHERE fetched_at < ?",
             ((datetime.now() - timedelta(days=30)).isoformat(),),
+        )
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 写真から読んだ品番のキャッシュ（photo_reader）
+# ──────────────────────────────────────────────────────────────────────────────
+
+def get_cached_photo_reads(urls: list[str], max_age_hours: int) -> dict[str, list[str]]:
+    """写真から読み取り済みの品番の文字列を返す（{url: [文字列]}。読めなかったものは []）。"""
+    if not urls:
+        return {}
+    cutoff = (datetime.now() - timedelta(hours=max_age_hours)).isoformat()
+    out: dict[str, list[str]] = {}
+    with _conn() as conn:
+        for i in range(0, len(urls), 500):
+            chunk = urls[i:i + 500]
+            marks = ",".join("?" * len(chunk))
+            rows = conn.execute(
+                f"SELECT url, texts FROM photo_read_cache "
+                f"WHERE url IN ({marks}) AND fetched_at > ?",
+                (*chunk, cutoff),
+            ).fetchall()
+            for url, texts in rows:
+                try:
+                    out[url] = [t for t in json.loads(texts) if isinstance(t, str)]
+                except ValueError:
+                    pass  # 壊れた行は無視（次回読み直す）
+    return out
+
+
+def cache_photo_read(url: str, texts: list[str], model: str | None, max_age_hours: int) -> None:
+    """写真から読んだ品番の文字列を保存する（texts=[] は読めなかった。model は採用した型番。記録用）。"""
+    now = datetime.now()
+    with _conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO photo_read_cache (url, texts, model, fetched_at) "
+            "VALUES (?, ?, ?, ?)",
+            (url, json.dumps(texts, ensure_ascii=False), model or "", now.isoformat()),
+        )
+        # 期限切れは掃除（DB肥大化防止）
+        conn.execute(
+            "DELETE FROM photo_read_cache WHERE fetched_at < ?",
+            ((now - timedelta(hours=max_age_hours)).isoformat(),),
         )
 
 

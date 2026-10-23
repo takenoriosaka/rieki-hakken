@@ -82,22 +82,65 @@ def get_description(url: str) -> str | None:
     try:
         resp = requests.get(url, headers=_HEADERS, timeout=15)
         resp.raise_for_status()
-        match = _NEXT_DATA_RE.search(resp.text)
-        if not match:
+        item = _item_json(resp.text)
+        if item is None:
             return None
-        item = (
-            json.loads(match.group(1))
-            .get("props", {})
-            .get("initialState", {})
-            .get("itemsState", {})
-            .get("items", {})
-            .get("item", {})
-        )
+        # 同じページの商品写真のURLも控えておく（get_image_urls で再取得せずに使う）
+        imgs = _parse_images(item)
+        if imgs:
+            _image_urls[url] = imgs
         desc = item.get("description")
         return desc.strip() if isinstance(desc, str) else None
     except Exception as e:
         print(f"[Yahoo!フリマ] 説明文取得エラー ({url}): {e}")
         return None
+
+
+# 説明文の取得時に同じページから取った商品写真のURL（商品URL → 写真URLの一覧）。
+# 写真から型番を読む機能（photo_reader）用
+_image_urls: dict[str, list[str]] = {}
+
+
+def get_image_urls(url: str) -> list[str] | None:
+    """商品写真のURL一覧（掲載順）を返す。説明文の取得で同じページを読んでいればそれを使う。
+    取得エラー・ページ構造が想定外なら None。
+
+    写真は説明文と同じ __NEXT_DATA__ の item.images[].url（原寸。i-img1200x1200-… 等）にある
+    （2026-10時点で確認）。
+    """
+    if url in _image_urls:
+        return _image_urls.pop(url)
+    try:
+        resp = requests.get(url, headers=_HEADERS, timeout=15)
+        resp.raise_for_status()
+        item = _item_json(resp.text)
+        return _parse_images(item) if item is not None else None
+    except Exception as e:
+        print(f"[Yahoo!フリマ] 写真URL取得エラー ({url}): {e}")
+        return None
+
+
+def _item_json(html: str) -> dict | None:
+    """商品ページの __NEXT_DATA__ から商品の JSON（props.initialState.itemsState.items.item）を取り出す。"""
+    match = _NEXT_DATA_RE.search(html)
+    if not match:
+        return None
+    return (
+        json.loads(match.group(1))
+        .get("props", {})
+        .get("initialState", {})
+        .get("itemsState", {})
+        .get("items", {})
+        .get("item", {})
+    )
+
+
+def _parse_images(item: dict) -> list[str] | None:
+    imgs = item.get("images")
+    if not isinstance(imgs, list):
+        return None
+    urls = [d.get("url") for d in imgs if isinstance(d, dict) and d.get("url")]
+    return list(dict.fromkeys(urls)) or None
 
 
 def _extract_items(html: str):

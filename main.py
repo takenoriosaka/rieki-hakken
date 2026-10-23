@@ -23,6 +23,7 @@ from datetime import datetime
 import analyzer
 import database
 import model_extractor
+import photo_reader
 from models import Deal
 from scrapers import yahoo_auctions
 from scrapers import mercari as mercari_scraper
@@ -45,7 +46,19 @@ DESCRIPTION_FETCHERS = {
     "yahoo_flea":     (yahoo_flea_market.get_description, 1),
 }
 
-# スキャン統計（説明文。相場取得の統計は analyzer.stats）
+# requests で1件ずつ商品写真のURLを取得する仕入れ先: source → (取得関数, 取得間隔秒)。写真から型番を読む機能
+# （photo_reader）用。説明文の取得で同じページを読んでいれば再取得しない（各スクレイパーの get_image_urls）。
+# 取得関数は取得エラーなら None を返す。間隔は DESCRIPTION_FETCHERS と同じ。
+# メルカリ安値は Playwright でまとめて取得するため別処理（mercari_scraper.get_image_urls）。
+IMAGE_FETCHERS = {
+    "yahoo_auctions": (yahoo_auctions.get_image_urls, 0),
+    "vector_park":    (vector_park.get_image_urls, 10),
+    "trefac":         (trefac_fashion.get_image_urls, 1),
+    "rakuma":         (rakuma.get_image_urls, 1),
+    "yahoo_flea":     (yahoo_flea_market.get_image_urls, 1),
+}
+
+# スキャン統計（説明文。相場取得の統計は analyzer.stats、写真読み取りの統計は photo_reader.stats）
 _stats = {"desc_fetched": 0, "desc_cached": 0}
 
 # 仕入れ先キー（Item.source と同じ値）→ ログ表示名。並び順＝検索順。
@@ -159,6 +172,10 @@ def scan(
     yahoo_auctions.reset_retry_state()
     for k in _stats:
         _stats[k] = 0
+    photo_reader.reset_session(settings)
+    # 前回スキャンで控えた商品写真のURLを捨てる（ローカル画面を起動したまま何度スキャンしても溜まらないように）
+    for mod in (yahoo_auctions, mercari_scraper, vector_park, trefac_fashion, rakuma, yahoo_flea_market):
+        mod._image_urls.clear()
 
     # Playwright ブラウザはスキャン全体で1つだけ起動し使い回す（毎回起動すると
     # 型番/価格帯ごとのメルカリ相場ルックアップが数百回発生し、1件19秒前後×件数で
@@ -182,6 +199,8 @@ def scan(
               f"メルカリ相場取得 {st['fetch']}回（うち0件 {st['zero']}回）/ "
               f"DBキャッシュ利用 {st['db_cache']}回 / 同一スキャン内の再利用 {st['memo']}回 / "
               f"説明文取得 {_stats['desc_fetched']}件（キャッシュ利用 {_stats['desc_cached']}件）")
+        if photo_reader.enabled() or photo_reader.stats["api_calls"]:
+            print(f"[スキャン統計] {photo_reader.summary()}")
 
 
 def _scan_keywords(
@@ -418,6 +437,7 @@ def _scan_keywords(
                 database.cache_descriptions(fetched)
                 descriptions.update(fetched)
 
+                unresolved: list = []   # 説明文でも型番・モデル名が取れなかった出品（写真から品番を読む対象）
                 for item in pending:
                     desc = descriptions.get(item.url)
                     title_name = title_names.get(item.url)
@@ -430,12 +450,23 @@ def _scan_keywords(
                         else:
                             candidates.append((item, title_name))
                         continue
-                    if not desc:
-                        continue
-                    model = model_extractor.extract(desc, brand_name, category)
+                    model = model_extractor.extract(desc, brand_name, category) if desc else None
                     if model:
                         candidates.append((item, model))
                         remember_name(item, desc, model)
+                    else:
+                        unresolved.append(item)
+
+                # それでも型番が無い出品は、写真（品質表示タグ・内側のタグ等）に写った品番を Claude で読む。
+                # .env に API キーがある本人の Mac だけで動く（それ以外は何もしない。photo_reader 参照）。
+                # 読んだ文字列は model_extractor.extract() で正規の型番形式に当てはまるものだけ採用する
+                if unresolved and photo_reader.enabled():
+                    photo_models = photo_reader.read_listings(
+                        unresolved, brand_name, category,
+                        lambda todo: _get_image_urls(todo, page))
+                    for item in unresolved:
+                        if item.url in photo_models:
+                            candidates.append((item, photo_models[item.url]))
 
             model_deals = []
             seen_models: set[str] = set()
@@ -570,6 +601,27 @@ def _scan_keywords(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+
+def _get_image_urls(items: list, page) -> dict[str, list[str] | None]:
+    """出品の商品写真のURL一覧を取得する（{item.url: 写真URLの一覧。取得エラーは None か含まない}）。
+    メルカリは Playwright でまとめて、他は IMAGE_FETCHERS で1件ずつ（仕入れ先ごとの取得間隔を空ける）。
+    ログインなし（Cookie・ブラウザのプロファイル等は使わない）。"""
+    out: dict[str, list[str] | None] = {}
+    mercari_urls = [it.url for it in items if it.source == "mercari_cheap"]
+    if mercari_urls:
+        out.update(mercari_scraper.get_image_urls(page, mercari_urls))
+    last_fetch: dict[str, float] = {}   # source → 前回取得時刻（取得間隔の確保用）
+    for it in items:
+        if it.source not in IMAGE_FETCHERS or it.url in out:
+            continue
+        get_image_urls, interval = IMAGE_FETCHERS[it.source]
+        wait = last_fetch.get(it.source, 0) + interval - time.time()
+        if wait > 0:
+            time.sleep(wait)
+        out[it.url] = get_image_urls(it.url)
+        last_fetch[it.source] = time.time()
+    return out
+
 
 def _load_config() -> dict:
     try:

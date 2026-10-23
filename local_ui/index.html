@@ -14,6 +14,7 @@
     <div class="header-text">
       <h1>仕入れリサーチ</h1>
       <p>この画面の結果はこのMacの中だけに表示されます（公開ダッシュボードには反映されません）</p>
+      <p class="photo-status" id="photoStatus" hidden></p>
     </div>
     <nav class="header-nav">
       <button type="button" class="nav-btn" id="navSetup" onclick="showSetup()">条件を選ぶ</button>
@@ -174,6 +175,7 @@
         <div class="stat"><div class="stat-label">残りの目安</div><div class="stat-value" id="remainText">計算中…</div></div>
         <div class="stat stat-found"><div class="stat-label">見つかった候補</div><div class="stat-value" id="foundText">0件</div></div>
       </div>
+      <div class="hint center photo-stats" id="photoStats" hidden></div>
       <div class="hint center" id="progressNote">候補の数は途中経過です。最後に条件（モデル・利益率・重複）で絞り込んだ件数が結果になります。</div>
       <div class="progress-actions" id="progressActions" hidden>
         <button type="button" class="primary-btn" onclick="showResultsView()">結果を見る</button>

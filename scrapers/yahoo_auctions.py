@@ -137,15 +137,61 @@ def _fetch(search_query: str, max_price: int, min_price: int, count: int) -> lis
 
 
 def get_description(url: str) -> str | None:
-    """商品詳細ページから説明文を取得する（タイトルに型番がない場合のフォールバック用）。"""
+    """商品詳細ページから説明文を取得する（タイトルに型番がない場合のフォールバック用）。
+    同じページの商品写真のURLも控えておく（get_image_urls で再取得せずに使う）。"""
     try:
         resp = _get(url)
+        _remember_images(url, resp.text)
         soup = BeautifulSoup(resp.text, "lxml")
         el = soup.select_one("#description")
         return el.get_text(strip=True) if el else None
     except Exception as e:
         print(f"[Yahoo Auctions] 説明文取得エラー ({url}): {e}")
         return None
+
+
+# 説明文の取得時に同じページから取った商品写真のURL（商品URL → 写真URLの一覧）。
+# 写真から型番を読む機能（photo_reader）用
+_image_urls: dict[str, list[str]] = {}
+
+
+def get_image_urls(url: str) -> list[str] | None:
+    """商品写真のURL一覧（掲載順）を返す。説明文の取得で同じページを読んでいればそれを使う。
+    取得エラー・ページ構造が想定外なら None。
+
+    写真は __NEXT_DATA__ の props.pageProps.initialState.item.detail.item.img[].image
+    （原寸。i-img900x1200-… 等）にある。ログインなしの requests で取得できることを確認済み（2026-10時点）。
+    """
+    if url in _image_urls:
+        return _image_urls.pop(url)
+    try:
+        return _parse_images(_get(url).text)
+    except Exception as e:
+        print(f"[Yahoo Auctions] 写真URL取得エラー ({url}): {e}")
+        return None
+
+
+def _remember_images(url: str, html: str) -> None:
+    imgs = _parse_images(html)
+    if imgs:
+        _image_urls[url] = imgs
+
+
+def _parse_images(html: str) -> list[str] | None:
+    m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.S)
+    if not m:
+        return None
+    try:
+        props = json.loads(m.group(1)).get("props", {})
+    except Exception:
+        return None
+    # pageProps 配下と props 直下の両方に同じものがある（どちらかが無くなっても動くように）
+    for state in (props.get("pageProps", {}).get("initialState"), props.get("initialState")):
+        imgs = (((state or {}).get("item") or {}).get("detail") or {}).get("item", {}).get("img")
+        if isinstance(imgs, list):
+            urls = [d.get("image") for d in imgs if isinstance(d, dict) and d.get("image")]
+            return list(dict.fromkeys(urls))
+    return None
 
 
 # 終了済みオークションの商品詳細ページに表示されるバナー文言。

@@ -37,6 +37,7 @@ from flask import Flask, jsonify, request, send_from_directory  # noqa: E402
 import database          # noqa: E402
 import main as scan_main  # noqa: E402
 import model_extractor   # noqa: E402
+import photo_reader      # noqa: E402
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("RIEKI_PORT", "8765"))
@@ -406,6 +407,8 @@ class _Job:
                 "found_count": self.found_count,
                 "conditions": self.conditions,
                 "error": self.error,
+                # 写真から型番を読む機能の有効/無効とスキャン統計（.env の API キー等で判定。キーの中身は含まない）
+                "photo_read": photo_reader.status_info(),
             }
             if with_results:
                 out["results"] = self.results

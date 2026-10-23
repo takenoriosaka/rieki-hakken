@@ -85,6 +85,7 @@ small { font-size: 13px; font-weight: 400; color: var(--muted); }
 .header-text { flex: 1; min-width: 200px; }
 .app-header h1 { font-size: 20px; font-weight: 700; letter-spacing: .02em; }
 .app-header p { font-size: 13px; opacity: .72; line-height: 1.45; }
+.app-header .photo-status { font-size: 12px; opacity: .6; }
 .header-nav { display: flex; gap: 8px; flex-wrap: wrap; }
 .nav-btn { background: transparent; border: 1px solid rgba(255,255,255,.28); color: var(--header-text); border-radius: 999px; padding: 7px 16px; font-size: 14px; cursor: pointer; }
 .nav-btn:hover { background: rgba(255,255,255,.08); }
