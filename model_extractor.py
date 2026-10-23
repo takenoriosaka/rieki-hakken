@@ -79,7 +79,15 @@ _PATTERNS: dict[str, list[str]] = {
 
     # ダウンジャケット（タグの品番表記。ブランドにより確度が異なる）
     "カナダグース": [
-        r'\b\d{4}[A-Z]\b',              # 2409L (Expedition), 3426M (Forester)
+        # 品番は 数字4桁 + 性別（M=メンズ・L=レディース）。前後に付く記号:
+        #   J=日本向け（3438JM・2302JL。3438MJ と後ろに書く出品もある）、B=ブラックレーベル（3804MB・3481JMB）、
+        #   A・I=フィット等の版違い（3426MA・2459MBA・3037JLI）、末尾の R=レギュラー丈（4565MR・7950JMR・「3433JM R」）
+        # 例: 2409L, 3426M, 3438JM, 2079JL, 3804MB, 3481JMB, 3802LA, 3804JLAR。小文字（3802la）も同じ品番。
+        # 変更前は \b\d{4}[A-Z]\b で、2文字以上の記号（JM・MB 等）と、日本語に続けて書いた品番
+        # （「シャトーパーカ2053MB」。\b は日本語を語の一部とみなす）を取りこぼしていた（メルカリ売り切れ 2026-10 確認）。
+        # 誤認しないもの: 価格・年（¥2580・2,580・2024AW・2025FW）、サイズ（「9061 M」= 空白の後の M/L）、
+        # キッズ（6948K）、帽子等の A だけの記号（1885A）。空白・ハイフン区切りは J 付き（3438 JM）のときだけ許す
+        r'(?<![A-Za-z0-9.,¥￥])[1-9]\d{3}(?:[\s\-]?J[ML]|[ML]J?)B?J?[AI]?R?(?![A-Za-z0-9])',
     ],
     "ピレネックス": [
         # HMS011, HWY012 (公式サイトで確認済み)。メルカリの表記ゆれ: hms011 / HMS 011 / HMS-011 /
@@ -109,7 +117,7 @@ _PATTERNS: dict[str, list[str]] = {
 # 抽出結果からハイフンも取り除くブランド（ND-91950 → ND91950）
 _STRIP_HYPHEN_BRANDS = {"ノースフェイス", "ピレネックス"}
 # 型番の照合前に全角英数字を整える（NFKC）ブランド（ＬＴＡ１３Ａ４３０１ 等の全角表記も拾う）
-_NFKC_NUMBER_BRANDS = {"タトラス"}
+_NFKC_NUMBER_BRANDS = {"タトラス", "カナダグース"}
 
 # ── レイバン: 仕入れ対象の代表型番と愛称（メルカリ売却済みで相場が付くもの。2026-10 確認）──
 # 画面の「型番の候補」に「RB2140 ウェイファーラー」のように愛称付きで出す（愛称が無いものは空文字）。
@@ -133,6 +141,18 @@ def _normalize_tatras(s: str) -> str:
     if m:
         return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
     return re.sub(r'[\s\-]+', '', s).upper()
+
+
+def _normalize_canadagoose(s: str) -> str:
+    """カナダグース品番の表記ゆれを整える: 3438mj / 3438 JM → 3438JM、3438MBJ → 3438JMB、
+    3804JLAR / 4565MR → 3804JLA / 4565M（丈の R は品番に含めない）。並びは 数字 + J + 性別 + B + A/I"""
+    s = re.sub(r'[\s\-]+', '', s).upper()
+    num, tail = s[:4], s[4:]
+    if tail.endswith("R"):
+        tail = tail[:-1]
+    gender = "M" if "M" in tail else "L"
+    return (num + ("J" if "J" in tail else "") + gender + ("B" if "B" in tail else "")
+            + "".join(c for c in tail if c in "AI"))
 
 
 # ── モデル名（コレクション名）で照合するブランド ────────────────────────
@@ -789,10 +809,151 @@ _SEARCH_VARIANTS: dict[str, dict[str, list[str]]] = {
 _STRICT_MODELS["タトラス"] = [(name, pats) for name, _en, pats in _TATRAS_MODELS]
 _STRICT_EN.update({name: en for name, en, _pats in _TATRAS_MODELS})
 
+
+# ── カナダグース: モデル名（品番 3438JM 等が無い出品だけモデル名で照合する）──────────────
+# メルカリ売り切れ（ログインなし。2026-10 調査: 271回検索・カナダグースのタイトル 4,490件）で
+# 売却がおおむね5件以上あったダウンのモデル（ローズ=RHODES は4件だが ¥130,000 と高額なので入れる）。品番がタイトルに載る出品は売却済みの約13%しかないため、
+# モデル名を主に照合する（品番があれば品番を優先し、品番の相場が無ければモデル名で取り直す）。
+# フリースのキンロス・ライトジャケットのミンデン・ニットのウィンドブリッジ等（ダウンでないもの）は入れない。
+# 右の件数・中央値は売り切れのタイトル（¥8,000 以上。ファーだけ等の部品を除くため）。
+# ブラックレーベル（ブラックディスク。上位ライン）は通常品より2〜8割高いモデルが多いため、
+# ブラックレーベルの売却が8件以上あり相場が15%以上違うモデルは「<モデル名> ブラックレーベル」を別モデルにする
+# （タイトルのどこかに「ブラックレーベル」「BLACK LABEL」等、または品番の B（3804MB 等）があるもの）。
+# 次の派生も親モデルより先に判定する:
+#   ハイブリッジライト（軽量版）40件 ¥29,999 ← ハイブリッジ（ニット切替・ベース等）85件 ¥55,000
+#   クロフトンベスト 6件 ¥56,500 ← クロフトン（パッファー）通常 33件 ¥90,000
+# 別モデルにしないもの: フュージョンフィット（アジア向けの細身。シャトー FF 11件 ¥52,000 / 全体 ¥55,000 等、
+# 相場の差が一定しない）、ヘリテージ（現行の定番ラインの呼び名）、PBI（シロクマ保護の限定色。5件以下）、
+# HUMANATURE（2件）、Rライン/丈（R=レギュラー）。ブラックレーベルの差が小さいクレストン（BL 47件 ¥70,000 /
+# 通常 45件 ¥70,000）・ロレッタ・ブライデン・ケントン等も分けない。
+# 誤判定対策: 「カナダグース風」「CANADA GOOSE系」「ジャスパー好きへ」（他社品の宣伝）、「ファーのみ」「フードのみ」
+# 「フード用ファー」等の部品だけの出品は除く。
+# 短い名前（ロッジ・キャンプ・ローズ・バンフ・リドー 等）は直前がカタカナでないこと（「アローズ」「フローレンス」
+# 「ブロッジ」を除く。「カナダグースロッジ」のようにブランド名に続けて書いたものは通す）、
+# 一般語と同じ名前（キャンプ・ポーター・アプローチ・ローズ）は「キャンプフーディ」「ポーターボンバー」
+# 「アプローチジャケット」「ローズパーカ」のように商品名の形のときだけモデル名とする。
+# 「ギャルソンベスト」はガーソンベストの別表記（コムデギャルソンとのコラボは除く）
+_CG_NF = r'(?!\s*(?:風|似|タイプ|系|と同じ|と同型|同型|みたい|のよう|っぽ|好き|様|さん|ちゃん|くん))'
+_CG_NOT_LIKE = (r'(?s)^(?!.*(?:カナダ\s*グース|CANADA\s*GOOSE)\s*(?:風|似|タイプ|系|っぽ|好き))'
+                r'(?!.*(?:(?:ファー|フード|ワッペン|タグ)\s*(?:のみ|だけ|単体|単品)|(?:フード|ファー)\s*用))')
+_CG_KB = r'(?:(?<![ァ-ヶー])|(?<=グース))'                     # 直前がカタカナでない（ブランド名の直後は可）
+_CG_A = r'(?:(?<![A-Za-z])|(?<=GOOSE))'
+_CG_Z = r'(?:(?![A-Za-z])|(?=(?:PARKA|JACKET|HOOD|VEST|BOMBER|PUFFER|COAT)))'   # JASPERPARKA 等
+_CG_BL = (r'(?=.*(?:ブラック\s*(?:レーベル|ラベル|ラペル|ディスク)|ブラレ|' + _A + r'BLACK\s*(?:LABEL|DISC)'
+          + r'|BLACKLABEL|(?<![A-Za-z0-9])[1-9]\d{3}J?[ML]J?B))')
+_CG_VEST = r'(?=.*(?:ベスト|' + _A + r'VEST' + _Z + r'))'
+
+
+def _cg(canon: str, en: str, kana: str, eng: str, cond: str = "") -> list[tuple[str, str, list[str]]]:
+    """カナダグースのモデル。kana / eng: 正規表現（英字は前後に英字が続かないこと）。
+    cond: タイトル全体の条件（ブラックレーベル・ベスト）"""
+    pats = [r'(?:' + kana + r')' + _CG_NF, _CG_A + r'(?:' + eng + r')' + _CG_Z + _CG_NF]
+    # モデル名そのもの（「ポーター」「CAMP」）は商品名の形でなくても正規名にする（main.py・app.py が
+    # extract_name(モデル名) で正規名かどうかを確かめるため。キャンプ・ポーター・アプローチ・ローズ用）
+    exact = r'(?i)^\s*(?:' + re.escape(canon) + r'|' + re.escape(en) + r')\s*$'
+    return [(canon, en, [_CG_NOT_LIKE + cond + r'(?=.*?(?:' + p + r'))' for p in pats] + [exact])]
+
+
+def _cg_bl(canon: str, en: str, kana: str, eng: str) -> list[tuple[str, str, list[str]]]:
+    """ブラックレーベルを別モデルにするモデル（ブラックレーベル → 通常品の順に判定する）。
+    正規名は空白入り（検索語「カナダグース ジャスパー ブラックレーベル」にするため。照合は空白を無視する）"""
+    return [*_cg(f"{canon} ブラックレーベル", f"{en} BLACK LABEL", kana, eng, cond=_CG_BL),
+            *_cg(canon, en, kana, eng)]
+
+
+_CANADAGOOSE_MODELS: list[tuple[str, str, list[str]]] = [
+    # ── メンズ（エクスペディションは男女共通）──
+    *_cg_bl("ジャスパー", "JASPER", r'ジャスパー|ジャスパ(?!ー)', r'JASPER'),  # BL 19件 ¥71,600 / 通常 152件 ¥49,850
+    *_cg_bl("シャトー", "CHATEAU", _CG_KB + r'シャトー', r'CHATEAU'),  # BL 38件 ¥81,950 / 通常 68件 ¥55,000
+    *_cg_bl("ウィンダム", "WYNDHAM", r'ウ[ィイ]ンダム', r'WYNDHAM'),  # BL 28件 ¥121,500 / 通常 105件 ¥89,000
+    *_cg_bl("マクミラン", "MACMILLAN", r'マッ?クミラン', r'MAC\s*MILLAN|MCMILLAN'),  # BL 45件 ¥100,000 / 通常 79件 ¥66,300
+    *_cg_bl("ロッジ", "LODGE", _CG_KB + r'ロッジ', r'LODGE'),  # BL 47件 ¥85,000 / 通常 63件 ¥65,000
+    *_cg_bl("ラングフォード", "LANGFORD", r'ラングフォード', r'LANGFORD'),  # BL 17件 ¥99,000 / 通常 45件 ¥69,800
+    *_cg_bl("カーソン", "CARSON", _CG_KB + r'カーソン', r'CARSON'),  # BL 8件 ¥82,000 / 通常 78件 ¥61,500
+    *_cg("クロフトンベスト", "CROFTON VEST", r'クロフトン', r'CROFTON', cond=_CG_VEST),  # 6件 ¥56,500
+    *_cg_bl("クロフトン", "CROFTON", r'クロフトン', r'CROFTON'),  # BL 25件 ¥100,000 / 通常 33件 ¥90,000
+    *_cg_bl("ガーソン", "GARSON", _CG_KB + r'ガーソン|(?<!コムデ)(?<!コム・デ・)(?<!コム デ )ギャルソン\s*(?:ダウン\s*)?ベスト',
+            r'GARSON'),  # BL 17件 ¥60,000 / 通常 57件 ¥46,000
+    *_cg("ハイブリッジライト", "HYBRIDGE LITE", r'ハイブリッ[ジドト]\s*ライト', r'HYBRIDGE\s*LITE'),  # 40件 ¥29,999
+    # ブラックレーベル（13件 ¥58,888）と通常品（72件 ¥53,000）の差が15%未満なので分けない
+    *_cg("ハイブリッジ", "HYBRIDGE", r'ハイブリッ[ジドト]', r'HYBRIDGE'),  # 85件 ¥55,000
+    *_cg("カムループス", "KAMLOOPS", r'カムループス|カムループ(?!ス)', r'KAMLOOPS?'),  # 135件 ¥32,000
+    *_cg("チリワック", "CHILLIWACK", r'チリワック', r'CHILL?IWACK'),  # 106件 ¥53,900
+    *_cg("ラブラドール", "LABRADOR", r'ラブラドール', r'LABRADOR'),  # 104件 ¥49,999
+    *_cg("エクスペディション", "EXPEDITION", r'エクスペデ[ィ]?ション', r'EXPEDITION'),  # 68件 ¥39,650
+    *_cg("クレストン", "CRESTON", r'クレストン', r'CRESTON'),  # 80件 ¥71,000
+    *_cg("ラッセル", "RUSSELL", _CG_KB + r'ラッセル', r'RUSSELL?'),  # 74件 ¥54,000
+    *_cg("フリースタイル", "FREESTYLE", r'フリー\s*スタイル', r'FREE\s*STYLE'),  # 80件 ¥33,000
+    *_cg("シタデル", "CITADEL", r'シタデル', r'CITADEL'),  # 52件 ¥37,000
+    *_cg("フレイザー", "FRASIER", r'フレイザー', r'FRAS(?:IE|E)R'),  # 31件 ¥85,000
+    *_cg("アームストロング", "ARMSTRONG", r'アームストロング', r'ARMSTRONG'),  # 32件 ¥54,500
+    *_cg("オーフォード", "ORFORD", r'オーフォード', r'ORFORD'),  # 26件 ¥45,500
+    *_cg("コンスタブル", "CONSTABLE", r'コンスタブル', r'CONSTABLE'),  # 25件 ¥27,900
+    *_cg("ヨークトン", "YORKTON", r'ヨークトン', r'YORKTON'),  # 22件 ¥40,250
+    *_cg("ウールフォード", "WOOLFORD", r'ウールフォード', r'WOOLFORD'),  # 19件 ¥48,000
+    *_cg("エモリー", "EMORY", r'エモリー', r'EMORY'),  # 16件 ¥60,000
+    *_cg("エバレット", "EVERETT", r'エ[バヴ]ェ?レット', r'EVERETT'),  # 17件 ¥77,000
+    *_cg("ケントン", "KENTON", _CG_KB + r'ケントン', r'KENTON'),  # 15件 ¥98,800
+    *_cg("ジャンクション", "JUNCTION", r'ジャンクション', r'JUNCTION'),  # 13件 ¥110,000
+    *_cg("ハミルトン", "HAMILTON", r'ハミルトン', r'HAMILTON'),  # 12件 ¥33,000
+    *_cg("ポーター", "PORTER", _CG_KB + r'ポーター\s*ボンバー', r'PORTER\s*BOMBER'),  # 10件 ¥91,499
+    *_cg("ブライデン", "BRYDEN", r'ブライデン', r'BRYDEN'),  # 11件 ¥155,000
+    *_cg("ブルックベール", "BROOKVALE", r'ブルックベール', r'BROOKVALE'),  # 10件 ¥39,000
+    *_cg("ブルックフィールド", "BROOKFIELD", r'ブルックフィールド', r'BROOKFIELD'),  # 6件 ¥42,500
+    *_cg("マクリーン", "MACLEAN", r'マクリーン', r'MAC\s*LEAN'),  # 9件 ¥98,000
+    *_cg("フォレスター", "FORESTER", r'フォレスター', r'FORESTER'),  # 10件 ¥55,500
+    *_cg("ボーデン", "BORDEN", _CG_KB + r'ボーデン', r'BORDEN'),  # 10件 ¥65,500
+    *_cg("アプローチ", "APPROACH", r'アプローチ\s*(?:ダウン\s*)?(?:ジャケット|パーカ|フーディ)',
+         r'APPROACH\s*(?:JACKET|HOOD)'),
+    *_cg("スノーマントラ", "SNOW MANTRA", r'スノー\s*マントラ', r'SNOW\s*MANTRA'),  # 8件 ¥66,500
+    *_cg("サボナ", "SAVONA", r'サ[ボバヴ]ォ?ナ', r'SAVONA'),  # 9件 ¥60,000
+    *_cg("ローズ", "RHODES", _CG_KB + r'ローズ\s*(?:パーカ|フーディ|ジャケット)', r'RHODES'),  # 4件 ¥130,000
+    *_cg("ペンビナ", "PEMBINA", r'ペンビナ', r'PEMBINA'),  # 6件 ¥56,220
+    *_cg("ラングレー", "LANGLEY", r'ラングレー', r'LANGLEY'),  # 5件 ¥44,000
+    *_cg("オズボーン", "OSBORNE", r'オズボーン', r'OSBORNE'),  # 12件 ¥85,190
+    *_cg("バンクロフト", "BANCROFT", r'バンクロフト', r'BANCROFT'),  # 13件 ¥39,700
+    *_cg("モントリオール", "MONTREAL", r'モントリオール', r'MONTREAL'),  # 52件 ¥19,800
+    *_cg("ウィンザー", "WINDSOR", r'ウ[ィイ]ンザー', r'WINDSOR'),  # 10件 ¥23,900
+    *_cg("ハドソン", "HUDSON", r'ハドソン', r'HUDSON'),  # 6件 ¥39,500
+    # ── レディース ──
+    *_cg_bl("シェルバーン", "SHELBURNE", r'シェルバーン', r'SHELBURNE?'),  # BL 35件 ¥75,000 / 通常 70件 ¥40,000
+    *_cg_bl("メイトランド", "MAITLAND", r'メイトランド', r'MAITLAND'),  # BL 71件 ¥58,100 / 通常 36件 ¥50,000
+    *_cg_bl("ロスクレア", "ROSSCLAIR", r'ロスクレア', r'ROSSCLAIR?'),  # BL 9件 ¥66,999 / 通常 31件 ¥41,000
+    *_cg_bl("チェルシー", "CHELSEA", r'チェルシー', r'CHELSEA'),  # BL 13件 ¥118,000 / 通常 25件 ¥63,200
+    *_cg("マッケンジー", "MACKENZIE", r'マッケンジー', r'MAC\s*KENZIE|MCKENZIE'),  # 104件 ¥37,000
+    *_cg("ブロンテ", "BRONTE", _CG_KB + r'[ブプ]ロンテ', r'BRONTE'),  # 99件 ¥35,000
+    *_cg("ケンジントン", "KENSINGTON", r'ケンジントン', r'KENSINGTON'),  # 49件 ¥37,500
+    *_cg("トリリウム", "TRILLIUM", r'トリリウム', r'TRILLIUM'),  # 38件 ¥42,900
+    *_cg("ヴィクトリア", "VICTORIA", r'[ヴビ]ィ?クトリア', r'VICTORIA'),  # 58件 ¥30,000
+    *_cg("モンテベロ", "MONTEBELLO", r'モンテベッ?ロ', r'MONTEBELLO'),  # 50件 ¥39,450
+    *_cg("シャーロット", "CHARLOTTE", r'シャーロット', r'CHARLOTTE'),  # 48件 ¥37,500
+    *_cg("ロレッタ", "LORETTE", r'ロレッ[タト]', r'LORETT[EA]'),  # 33件 ¥61,000
+    *_cg("ミスティーク", "MYSTIQUE", r'ミスティー?ク|ミスティック', r'MYSTIQUE'),  # 30件 ¥79,000
+    *_cg("ソラリス", "SOLARIS", r'ソラリス', r'SOLARIS'),  # 29件 ¥42,100
+    *_cg("アリストン", "ALLISTON", r'アリストン', r'ALLISTON'),  # 23件 ¥68,000
+    *_cg("サイプレス", "CYPRESS", r'サイプレス', r'CYPRESS'),  # 14件 ¥66,500
+    *_cg("キャンプ", "CAMP", _CG_KB + r'キャンプ\s*(?:フーディ|ダウン|ジャケット)', r'CAMP\s*(?:HOOD|DOWN|JACKET)'),  # 8件 ¥33,460
+    *_cg("オーロラ", "AURORA", _CG_KB + r'オーロラ(?!\s*(?:カラー|色))', r'AURORA'),  # 9件 ¥118,000
+    *_cg("ローレンス", "LAWRENCE", _CG_KB + r'ローレンス', r'LAWRENCE'),  # 12件 ¥86,000
+    *_cg("リドー", "RIDEAU", _CG_KB + r'リドー', r'RIDEAU'),  # 11件 ¥39,000
+    *_cg("バイワード", "BYWARD", r'バイワード', r'BYWARD'),  # 7件 ¥137,100
+    *_cg("エルズミア", "ELLESMERE", r'エルズミア', r'ELLESMERE'),  # 6件 ¥42,750
+    *_cg("バンフ", "BANFF", _CG_KB + r'バンフ', r'BANFF'),  # 5件 ¥40,000
+    *_cg("エッジウッド", "EDGEWOOD", r'エッジウッド', r'EDGEWOOD'),  # 5件 ¥65,000
+    *_cg("ベルビル", "BELLEVILLE", r'ベルビル', r'BELLEVILLE'),  # 44件 ¥40,000
+]
+_SEARCH_VARIANTS["カナダグース"] = {
+    "ガーソン": ["ギャルソンベスト"],   # 「カナダグース ギャルソンベスト」13件（ガーソンと書かないものが多い）
+    "ハイブリッジ": ["ハイブリッド"],   # 「ハイブリッド ライトダウン」等 14件
+    "ラッセル": ["RUSSEL"],            # 「CANADA GOOSE Russel Parka」等 5件（英字のみのタイトル）
+}
+_STRICT_MODELS["カナダグース"] = [(name, pats) for name, _en, pats in _CANADAGOOSE_MODELS]
+_STRICT_EN.update({name: en for name, en, _pats in _CANADAGOOSE_MODELS})
+
 # モデル名の照合をこのジャンルに限るブランド（ルイヴィトンのサングラスにバッグのモデル名を使わない）
 _NAME_CATEGORIES = {"ルイヴィトン": "バッグ"}
 # モデル名の照合前に全角英数字等を整える（NFKC）ブランド
-_NFKC_NAME_BRANDS = {"ルイヴィトン", "ティファニー", "タトラス"}
+_NFKC_NAME_BRANDS = {"ルイヴィトン", "ティファニー", "タトラス", "カナダグース"}
 
 for _brand, _models in _STRICT_MODELS.items():
     _MODEL_NAMES[_brand] = [x for _name, _ in _models for x in (_name, _STRICT_EN[_name])]
@@ -839,8 +1000,9 @@ _STRICT_NAME_KEYS = {
 
 
 # 型番の相場が取れないときに、同じ出品のモデル名で相場を取り直すブランド（main.py）。
-# タトラスは品番が売却済みのタイトルに載ることが少なく（約3%）、品番で検索すると0件になりやすいため
-_NAME_FALLBACK_BRANDS = {"タトラス"}
+# タトラスは品番が売却済みのタイトルに載ることが少なく（約3%）、品番で検索すると0件になりやすいため。
+# カナダグースも同様（品番が載るのは約13%。3438JM・3438M・3438MB のように記号違いの品番が多い）
+_NAME_FALLBACK_BRANDS = {"タトラス", "カナダグース"}
 
 
 def name_fallback(brand: str) -> bool:
@@ -876,7 +1038,7 @@ _NUMBER_EXAMPLES: dict = {
     "トムフォード": ["TF237", "TF5401"],
     "バーバリー": ["BE4216"],
     "クリスチャンディオール": ["CD3182S", "0175S"],
-    "カナダグース": ["2409L", "3426M"],
+    "カナダグース": ["2409L", "3426M", "3438JM", "2302JL", "3804MB"],
     "ピレネックス": ["HMS011", "HWY012", "HMI055"],
     "タトラス": ["LTA13A4301", "MTA15S4468", "MTK20A4201", "MTAT21A4754-D", "LTA2BM4694", "MTA-460-12"],
     "ノースフェイス": ["ND91950", "NDW91952", "NP62130"],
@@ -1400,6 +1562,10 @@ BRAND_ALIASES: dict[str, list[str]] = {
     "ヘルノ": ["ヘルノ", "HERNO"],
     # 英字だけのタイトル（TATRAS POLITEAMA 等）もメルカリ相場のブランド名チェックを通るようにする
     "タトラス": ["タトラス", "TATRAS"],
+    # 英字だけのタイトル（CANADA GOOSE JASPER PARKA 等。売り切れの約3割）もメルカリ相場のブランド名チェックを通るようにする
+    # （変更前は未登録で「カナダグース」と書かれたタイトルだけが相場に入っていた）。「カナダグ-ス」は実際の誤記
+    "カナダグース": ["カナダグース", "カナダ グース", "カナダ・グース", "カナダグ-ス", "CANADA GOOSE", "CANADAGOOSE",
+                  "CANADA-GOOSE"],
 }
 
 # 前後に英字が続かないときだけ一致とする表記（単語境界付きで照合する）。ここに無い表記は従来どおり部分一致
@@ -1612,6 +1778,8 @@ def extract(title: str, brand: str = "", category: str = "") -> str | None:
                 return _normalize_rayban(match.group(0))
             if brand == "タトラス":
                 return _normalize_tatras(match.group(0))
+            if brand == "カナダグース":
+                return _normalize_canadagoose(match.group(0))
             sep = r'[\s\-]+' if brand in _STRIP_HYPHEN_BRANDS else r'\s+'
             return re.sub(sep, '', match.group(0)).upper()
 

@@ -326,7 +326,7 @@ def build_plan(req: dict, cfg: dict) -> list[tuple[dict, str | None]]:
         if not targets:
             if kw["name"] not in seen:
                 seen.add(kw["name"])
-                # モデル名展開の検索（config.json の search_all_models。タトラス）: モデルを選ばなかったときは
+                # モデル名展開の検索（config.json の search_all_models。タトラス・カナダグース）: モデルを選ばなかったときは
                 # 「タトラス ダウン」に加えて登録済みの全モデルの「タトラス <カタカナ名>」「タトラス <英字名>」でも
                 # 仕入れ先を検索する（取りこぼしを無くすため。結果の照合は従来どおり型番優先・無ければモデル名）
                 extra = all_model_queries(kw, cfg)
@@ -377,7 +377,7 @@ def _deal_matches_model(deal, model: str, aliases: dict[str, list[str]]) -> bool
         want = model_extractor.extract(model, deal.brand) or model
         if _norm(deal.model) == _norm(want):
             return True
-        # タトラス: 品番で照合した出品も、タイトルのモデル名が選んだモデルなら含める
+        # タトラス・カナダグース: 品番で照合した出品も、タイトルのモデル名が選んだモデルなら含める
         if model_extractor.name_fallback(deal.brand):
             return model_extractor.extract_name(deal.item.title, deal.brand) == want
         return False

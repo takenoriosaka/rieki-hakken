@@ -239,7 +239,7 @@ def _scan_keywords(
         min_market_samples   = kw_conf.get("min_market_samples", 1)
 
         # 仕入れ先の検索語。ローカル画面でモデル名を選んだ場合は「カタカナ名」「英字名」の
-        # 2本が search_queries に入る（app.build_plan）。モデル名展開の検索（search_all_models。タトラス）で
+        # 2本が search_queries に入る（app.build_plan）。モデル名展開の検索（search_all_models。タトラス・カナダグース）で
         # モデルを選ばなかった場合は keyword + 全モデルの検索語が入る。通常のキーワードは keyword の1本だけ
         queries = [q for q in (kw_conf.get("search_queries") or [keyword]) if q]
         excl_str = f" 除外:{exclude_words}" if exclude_words else ""
@@ -358,12 +358,13 @@ def _scan_keywords(
         #    → 他ブランドやあいまいマッチによる誤混入を防ぐ
         if effective_required:
             before = len(sources_items)
-            # モデル名展開の検索（search_all_models。タトラス）では、required_words（ダウン等）が
+            # モデル名展開の検索（search_all_models。タトラス・カナダグース）では、required_words（ダウン等）が
             # タイトルに無くても、ブランド名と登録済みのモデル名がタイトルにある出品は通す。
             # 「タトラス ポリテアマ」で取れる出品は「TATRAS POLITEAMA ブラック 1」のようにダウンと書かれないことが
-            # 多いが、登録済みのモデルはすべてダウンのモデル（model_extractor._TATRAS_MODELS）のため。
+            # 多いが、登録済みのモデルはすべてダウンのモデル（model_extractor._TATRAS_MODELS・_CANADAGOOSE_MODELS。
+            # カナダグースも「CANADA GOOSE JASPER PARKA」「ジャスパーパーカー」のようにダウンと書かれないことが多い）のため。
             # 相場（メルカリ売却済み）は従来どおり required_words を満たすものだけで出す。
-            # またモデル名展開の検索では、タイトルにブランド名（タトラス/TATRAS）が無い出品は除く。
+            # またモデル名展開の検索では、タイトルにブランド名（タトラス/TATRAS、カナダグース/CANADA GOOSE）が無い出品は除く。
             # 検索語が多いぶん他ブランドの出品も混ざり（実例:「DUVETICA ARISTEO ダウンベスト」が
             # 説明文のモデル名でドミツィアーノと判定された）、「ノコ」「タロ」等の短いモデル名だけでは判定できないため
             all_models = bool(kw_conf.get("search_all_models"))
@@ -415,9 +416,9 @@ def _scan_keywords(
             candidates: list[tuple] = []   # (item, model)
             pending: list = []             # タイトルで型番なし→説明文を確認する対象
             # 型番の相場が無いときに代わりに使うモデル名（item.url → モデル名）。
-            # 品番がタイトルに載ることが少ないブランド（タトラス）だけ。model_extractor.name_fallback 参照
+            # 品番がタイトルに載ることが少ないブランド（タトラス・カナダグース）だけ。model_extractor.name_fallback 参照
             fallback_names: dict[str, str] = {}
-            # タイトルでモデル名だけが取れた出品（item.url → モデル名）。name_fallback のブランド（タトラス）は
+            # タイトルでモデル名だけが取れた出品（item.url → モデル名）。name_fallback のブランド（タトラス・カナダグース）は
             # 型番を優先するため、説明文に品番があるかも確認する
             title_names: dict[str, str] = {}
 
@@ -533,7 +534,7 @@ def _scan_keywords(
                     # 相場を取得済みの案件は結果に残す（次のキーワードの切れ目で中断する）
                     print(f"    [中断] 型番ごとの相場の確認を打ち切りました")
                     break
-                # 型番の相場が無ければ、同じ出品のモデル名で相場を取り直す（fallback_names。タトラス）
+                # 型番の相場が無ければ、同じ出品のモデル名で相場を取り直す（fallback_names。タトラス・カナダグース）
                 tries = [model] + ([fallback_names[item.url]] if item.url in fallback_names else [])
                 for model in tries:
                     model_key = model_extractor.normalize(model)

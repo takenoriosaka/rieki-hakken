@@ -329,7 +329,7 @@ function estimatePlan() {
     if (!state.categories.has(k.category) || !brands.has(k.brand)) return;
     const picked = [...state.models, ...activeNumbers()].filter(v => v.startsWith(k.brand + '|')).map(v => v.split('|')[1]);
     const targets = picked.concat(free);
-    // モデル名展開の検索（search_all_models。タトラス）は全モデルの検索語も足す
+    // モデル名展開の検索（search_all_models。タトラス・カナダグース）は全モデルの検索語も足す
     if (!targets.length) { n += 1; q += 1 + (k.model_queries || 0); return; }
     const extra = targets.filter(m => !k.name.toUpperCase().includes(m.toUpperCase()));
     const base = extra.length < targets.length ? 1 : 0;
