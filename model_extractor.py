@@ -714,7 +714,8 @@ def _tt(canon: str, en: str, kana: str, eng: str, cond: str = "") -> list[tuple[
     return [(canon, en, [_TT_NOT_LIKE + cond + r'(?=.*?(?:' + p + r'))' for p in pats])]
 
 
-_TT_DOMIZIANO = (r'ドミッ?ツィ?アーノ', r'DOMIZIANO')
+# 英字の綴り違い（メルカリ売り切れのタイトル。ログインなし 2026-10 確認）: DOMIZINO 2件
+_TT_DOMIZIANO = (r'ドミッ?ツィ?アーノ', r'DOMIZIA?NO')
 _TT_SILK = r'(?=.*(?:シルク|' + _A + r'SILK' + _Z + r'))'
 
 _TATRAS_MODELS: list[tuple[str, str, list[str]]] = [
@@ -726,18 +727,18 @@ _TATRAS_MODELS: list[tuple[str, str, list[str]]] = [
     *_tt("オルサバ", "OLSAVA", r'オルサ[バヴ]ァ?', r'O[LR]SAVA'),                                # 14件 ¥94,000
     *_tt("コサヴァ", "KOSAVA", r'コサ[ヴバ]ァ?', r'KOSAVA'),                                      # 82件 ¥67,950
     *_tt("クラッツ", "KRAZ", r'クラッツ|クラーズ', r'KRAZ'),                                      # 108件 ¥34,450
-    *_tt("ベルボ", "BELBO", r'ベルボ(?!トム)', r'BELBO'),                                         # 97件 ¥53,000
+    *_tt("ベルボ", "BELBO", r'ベルボ(?!トム)', r'BE[LR]BO'),                                      # 97件 ¥53,000 （BERBO 1件）
     # ── レディース ──
     *_tt("アカシア", "ACACIA", r'アカシア|アカッチャ', r'ACACIA'),                               # 24件 ¥36,500
-    *_tt("ポリテアマ", "POLITEAMA", r'ポリテア?ー?マ|ポリアテマ|ポルテアマ', r'POLITEAMA'),        # 129件 ¥38,000
+    *_tt("ポリテアマ", "POLITEAMA", r'ポリテア?ー?マ|ポリアテマ|ポルテアマ', r'POLITEA?MA'),       # 129件 ¥38,000 （POLITEMA 1件）
     *_tt("ラビアナ", "LAVIANA", r'ラ[ビヴ]ィ?アナ', r'LAVIANA'),                                   # 98件 ¥46,040
-    *_tt("ヴァレナ", "VARENA", r'ヴァレナ|' + _KB + r'バレナ', r'VARENA'),                         # 79件 ¥61,000
+    *_tt("ヴァレナ", "VARENA", r'ヴァレナ|' + _KB + r'バレナ', r'V[AE]RENA'),                      # 79件 ¥61,000 （VERENA 5件）
     *_tt("バビラ", "BABILA", r'バビラ', r'BABILA'),                                               # 66件 ¥23,250
-    *_tt("サルマ", "SARMA", _KB + r'サルマ' + _KE, r'SARMA'),                                     # 57件 ¥70,000
+    *_tt("サルマ", "SARMA", _KB + r'サルマ' + _KE, r'SARU?MA'),                                   # 57件 ¥70,000 （SARUMA 4件）
     *_tt("ノコ", "NOKO", _KB + r'ノコ' + _KE, r'NOKO'),                                           # 69件 ¥49,800
-    *_tt("チーマ", "CIMA", _KB + r'チーマ' + _KE, r'CIMA'),                                       # 60件 ¥43,950
+    *_tt("チーマ", "CIMA", _KB + r'チーマ' + _KE, r'CH?IMA'),                                     # 60件 ¥43,950 （CHIMA 1件）
     *_tt("サリン", "SARIN", _KB + r'サリン' + _KE, r'SARIN'),                                     # 51件 ¥18,200
-    *_tt("アゴーニャ", "AGOGNA", r'アゴーニャ', r'AGOGNA|AGONA'),                                 # 50件 ¥21,000
+    *_tt("アゴーニャ", "AGOGNA", r'アゴーニャ', r'AGOGNA|AGONY?A'),                               # 50件 ¥21,000 （AGONYA 1件）
     *_tt("クルサ", "CURSA", _KB + r'クルサ' + _KE, r'CURSA'),                                     # 39件 ¥23,000
     *_tt("ロレンツァーナ", "LORENZANA", r'ロレンツァーナ', r'LORENZANA'),                         # 37件 ¥23,760
     *_tt("スピノサ", "SPINOSA", r'スピノサ', r'SPINOSA'),                                         # 38件 ¥35,750
@@ -758,7 +759,7 @@ _TATRAS_MODELS: list[tuple[str, str, list[str]]] = [
     *_tt("ボルボレ", "BORBORE", r'ボルボレ', r'BORBORE'),                                         # 101件 ¥46,000
     *_tt("アゴルド", "AGORDO", r'アゴルド', r'AGORDO'),                                           # 92件 ¥47,250
     *_tt("ジェッソ", "GESSO", r'ジェッソ', r'GESSO'),                                             # 82件 ¥35,000
-    *_tt("ポセイドーネ", "POSEIDONE", r'ポセイドー?ネ|ポセイドン', r'POSEIDONE'),                 # 77件 ¥36,000
+    *_tt("ポセイドーネ", "POSEIDONE", r'ポセイドー?ネ|ポセイドン', r'POSEIDONE?'),                # 77件 ¥36,000 （POSEIDON 1件）
     *_tt("ボエシオ", "BOESIO", r'ボエシオ', r'BOESIO'),                                           # 60件 ¥38,650
     *_tt("セラミカ", "CERAMICA", r'セラミカ', r'CERAMICA'),                                       # 34件 ¥38,750
     *_tt("ブレヴァ", "BREVA", r'ブレ[ヴバ]ァ?' + _KE, r'BREVA'),                                  # 32件 ¥47,450
@@ -779,6 +780,12 @@ _TATRAS_MODELS: list[tuple[str, str, list[str]]] = [
     *_tt("サルガス", "SARGAS", r'サルガス', r'SARGAS'),                                           # 20件 ¥29,400
     *_tt("ディナンド", "DINANDO", r'ディナンド', r'DINANDO'),                                     # 4件 ¥79,100
 ]
+# 検索語に加える英字の綴り違い（ブランド → {正規名: [綴り]}）。メルカリ売り切れ（ログインなし 2026-10 確認）で
+# 正しい英字名を含まないタイトルが一定数あったもの。他の綴り違い（SARUMA・CHIMA 等）は1〜4件で、
+# どれもカタカナ名も併記されているため照合（正規表現）にだけ加え、検索語にはしない
+_SEARCH_VARIANTS: dict[str, dict[str, list[str]]] = {
+    "タトラス": {"ヴァレナ": ["VERENA"]},   # 「TATRAS VERENA ダウンジャケット」等 5件（英字のみのタイトル）
+}
 _STRICT_MODELS["タトラス"] = [(name, pats) for name, _en, pats in _TATRAS_MODELS]
 _STRICT_EN.update({name: en for name, en, _pats in _TATRAS_MODELS})
 
@@ -1502,7 +1509,7 @@ def model_aliases(model: str, brand: str = "") -> list[str]:
 
 
 def search_names(model: str, brand: str = "") -> list[str]:
-    """検索に使うモデル名の一覧: [カタカナ名, 英字名]。
+    """検索に使うモデル名の一覧: [カタカナ名, 英字名, 英字の綴り違い…]。
     英字名が無い・カタカナ名と同じ（正規化後）・モデル名が英字のみ → 1件だけ返す。
     型番（数字を含み名称リストに無いもの）も [model] のまま。
     """
@@ -1510,6 +1517,10 @@ def search_names(model: str, brand: str = "") -> list[str]:
     names = [kana]
     if en and _n(en) != _n(kana):
         names.append(en)
+    # 英字の綴り違いで出品の多いもの（_SEARCH_VARIANTS。タトラスの VERENA 等）も検索する
+    for v in _SEARCH_VARIANTS.get(brand, {}).get(kana, []):
+        if all(_n(v) != _n(x) for x in names):
+            names.append(v)
     return names
 
 

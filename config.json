@@ -373,6 +373,7 @@
         "DOWN"
       ],
       "require_model_number": true,
+      "search_all_models": true,
       "brand_name": "タトラス",
       "category": "ダウン"
     },

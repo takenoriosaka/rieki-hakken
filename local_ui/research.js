@@ -329,7 +329,8 @@ function estimatePlan() {
     if (!state.categories.has(k.category) || !brands.has(k.brand)) return;
     const picked = [...state.models, ...activeNumbers()].filter(v => v.startsWith(k.brand + '|')).map(v => v.split('|')[1]);
     const targets = picked.concat(free);
-    if (!targets.length) { n += 1; q += 1; return; }
+    // モデル名展開の検索（search_all_models。タトラス）は全モデルの検索語も足す
+    if (!targets.length) { n += 1; q += 1 + (k.model_queries || 0); return; }
     const extra = targets.filter(m => !k.name.toUpperCase().includes(m.toUpperCase()));
     const base = extra.length < targets.length ? 1 : 0;
     n += extra.length + base;
@@ -625,13 +626,16 @@ function showProgress(s) {
   if (running && s.stop_requested) { $('stopBtn').disabled = true; }
   $('progressActions').hidden = running;
   const total = s.total || 0;
-  const done = running ? s.index : (s.state === 'done' ? total : s.index);
+  // キーワード内の何本目の検索か（q_index / q_total）も進み具合に含める（1キーワードで検索語が多いとき用）
+  const qFrac = running ? searchFrac(s) : 0;
+  const done = running ? s.index + qFrac : (s.state === 'done' ? total : s.index);
   const pct = total ? Math.round(done / total * 100) : 0;
   $('barFill').style.width = (running ? Math.max(pct, 2) : pct) + '%';
   $('bigBar').setAttribute('aria-valuenow', pct);
   $('bigBar').classList.toggle('running', running);
   $('pctText').textContent = `${pct}%`;
-  $('kwCount').textContent = total ? `${running ? Math.min(s.index + 1, total) : done} / ${total} キーワード` : '準備中…';
+  const qText = running && s.q_total > 1 ? `・検索 ${Math.min((s.q_index || 0) + 1, s.q_total)} / ${s.q_total} 本` : '';
+  $('kwCount').textContent = total ? `${running ? Math.min(s.index + 1, total) : done} / ${total} キーワード${qText}` : '準備中…';
   const titles = { running: '🔍 リサーチ中…', done: '✅ リサーチ完了', stopped: '⏹ リサーチを中止しました', error: '⚠ エラーで停止しました' };
   $('progressTitle').textContent = titles[s.state] || s.state;
   $('progressCond').textContent = condSummary(s.conditions);
@@ -659,6 +663,14 @@ function showProgress(s) {
   updateNav();
 }
 
+// キーワード内の検索の進み具合を、1キーワードの所要時間に占める割合で返す。
+// 検索の後に説明文・相場の確認があり（タトラス全モデル・ラクマ+トレファクの実測で検索は全体の2割程度）、
+// 検索が終わっても1キーワードの2割までしか進めない
+const SEARCH_SHARE = 0.2;
+function searchFrac(s) {
+  return s.q_total ? Math.min(1, (s.q_index || 0) / s.q_total) * SEARCH_SHARE : 0;
+}
+
 function updateTimes(s) {
   if (!s.started_at) { $('elapsedText').textContent = '—'; $('remainText').textContent = '—'; return; }
   const start = new Date(s.started_at).getTime();
@@ -668,9 +680,12 @@ function updateTimes(s) {
   if (s.state !== 'running') { $('remainText').textContent = s.state === 'done' ? '完了' : '—'; return; }
   const total = s.total || 0;
   if (!total) { $('remainText').textContent = '計算中…'; return; }
-  if (s.index < 1) { $('remainText').textContent = '1件目の完了後に表示'; return; }
+  // キーワード内の検索の進み具合（q_index / q_total）も含める。検索語が多いキーワード（タトラスの全モデル）用。
+  // 検索の後の説明文・相場の確認の時間は含まないので目安
+  const done = s.index + searchFrac(s);
+  if (done < 0.005) { $('remainText').textContent = s.q_total ? '数本の検索の後に表示' : '1件目の完了後に表示'; return; }
   // ここまでの1キーワードあたりの平均時間から残りを見積もる
-  const rest = sec / s.index * (total - s.index);
+  const rest = sec / done * (total - done);
   const m = Math.round(rest / 60);
   $('remainText').textContent = m < 1 ? 'あと1分未満' : m >= 60 ? `あと約${Math.floor(m / 60)}時間${m % 60}分` : `あと約${m}分`;
 }

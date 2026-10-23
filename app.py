@@ -224,7 +224,9 @@ def build_options() -> dict:
         },
         "sources": sources,
         "keywords": [
-            {"name": kw["name"], "brand": _brand_of(kw), "category": _cat(kw.get("category", "") or "その他")}
+            {"name": kw["name"], "brand": _brand_of(kw), "category": _cat(kw.get("category", "") or "その他"),
+             # モデル未選択のときに足す検索語の本数（search_all_models。画面の所要時間の目安に使う）
+             "model_queries": len(all_model_queries(kw, cfg))}
             for kw in keywords
         ],
         "defaults": {
@@ -247,6 +249,39 @@ def _to_int(v, default=None):
         return int(float(v))
     except (TypeError, ValueError):
         return default
+
+
+def _brand_models(brand: str) -> list[str]:
+    """ブランドの登録済みモデル名（カタカナの正規名。英字だけの正規名はそのまま）の一覧"""
+    out: list[str] = []
+    for n in model_extractor._MODEL_NAMES.get(brand, []):
+        canon = model_extractor.model_names(n, brand)[0]
+        if canon not in out:
+            out.append(canon)
+    return out
+
+
+def all_model_queries(kw: dict, cfg: dict) -> list[str]:
+    """search_all_models が有効なキーワードで、モデル未選択のときに足す検索語の一覧。
+    全モデルについて「ブランド名 + カタカナ名」「ブランド名 + 英字名」（model_extractor.search_names の
+    ルール。英字名が無い・同じ表記のモデルは1本）。モデルを選んだときと同じ検索語にする（build_plan 参照）。
+    フラグが無いキーワードは []（他ブランドの挙動は変えない）"""
+    if not kw.get("search_all_models"):
+        return []
+    brand = _brand_of(kw)
+    cat = _cat(kw.get("category", "") or "その他")
+    queries: list[str] = []
+    for m in _brand_models(brand):
+        if not model_extractor.name_fits(m, brand, cat):
+            continue
+        names = model_extractor.search_names(m, brand)
+        fits = [k for k in cfg["keywords"] if _brand_of(k) == brand
+                and model_extractor.name_fits(m, brand, _cat(k.get("category", "") or "その他"))]
+        head = brand if len(fits) <= 1 else kw["name"]
+        for q in [f"{head} {names[0]}"] + [f"{brand} {n}" for n in names[1:]]:
+            if q not in queries:
+                queries.append(q)
+    return queries
 
 
 def build_plan(req: dict, cfg: dict) -> list[tuple[dict, str | None]]:
@@ -291,6 +326,13 @@ def build_plan(req: dict, cfg: dict) -> list[tuple[dict, str | None]]:
         if not targets:
             if kw["name"] not in seen:
                 seen.add(kw["name"])
+                # モデル名展開の検索（config.json の search_all_models。タトラス）: モデルを選ばなかったときは
+                # 「タトラス ダウン」に加えて登録済みの全モデルの「タトラス <カタカナ名>」「タトラス <英字名>」でも
+                # 仕入れ先を検索する（取りこぼしを無くすため。結果の照合は従来どおり型番優先・無ければモデル名）
+                extra = all_model_queries(kw, cfg)
+                if extra:
+                    kw = copy.deepcopy(kw)
+                    kw["search_queries"] = [kw["name"]] + [q for q in extra if q != kw["name"]]
                 plan.append((kw, None))
             continue
         for m in targets:
@@ -384,6 +426,8 @@ class _Job:
         self.index = 0
         self.total = 0
         self.keyword = ""
+        self.q_index = 0           # キーワード内の何本目の検索か（仕入れ先 × 検索語。0 始まり）
+        self.q_total = 0           # キーワード内の検索の本数（0 = 不明）
         self.started_at = None
         self.finished_at = None
         self.logs: deque[str] = deque(maxlen=400)
@@ -400,6 +444,8 @@ class _Job:
                 "index": self.index,
                 "total": self.total,
                 "keyword": self.keyword,
+                "q_index": self.q_index,
+                "q_total": self.q_total,
                 "started_at": self.started_at,
                 "finished_at": self.finished_at,
                 "logs": list(self.logs)[-60:],
@@ -490,10 +536,13 @@ def _run_job(req: dict):
         aliases = _model_aliases()
         model_of = {kw["name"]: m for kw, m in plan}
 
-        def progress(i, total, keyword):
+        def progress(i, total, keyword, q_index=0, q_total=0):
+            # q_index / q_total: そのキーワードの中で何本目の検索か（仕入れ先 × 検索語。0 始まり）
             with JOB.lock:
                 JOB.index = i
                 JOB.keyword = keyword
+                JOB.q_index = q_index
+                JOB.q_total = q_total
 
         database.init_db()
         deals = scan_main.scan(
@@ -598,6 +647,8 @@ def api_research():
         JOB.index = 0
         JOB.total = 0
         JOB.keyword = ""
+        JOB.q_index = 0
+        JOB.q_total = 0
         JOB.logs.clear()
         JOB.results = []
         JOB.error = ""

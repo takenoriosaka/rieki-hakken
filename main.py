@@ -162,8 +162,10 @@ def scan(
 
     sources:     検索する仕入れ先キーの集合（None なら全仕入れ先）。SOURCE_LABELS 参照
     item_filter: 仕入れ候補 Item を受け取り True/False を返す関数（相場計算前に適用）
-    progress:    progress(index, total, keyword) 形式のコールバック（index は 0 始まり）
-    should_stop: True を返すとキーワードの切れ目で中断する関数
+    progress:    progress(index, total, keyword[, q_index, q_total]) 形式のコールバック（index は 0 始まり）。
+                 q_index / q_total はキーワード内の何本目の検索か（仕入れ先 × 検索語。0 始まり）
+    should_stop: True を返すと中断する関数。キーワードの切れ目のほか、仕入れ先の検索語の切れ目・
+                 説明文の取得・型番ごとの相場取得の途中でも確認する（検索語の多いキーワード＝タトラスの全モデル用）
     """
     from playwright.sync_api import sync_playwright
 
@@ -221,7 +223,9 @@ def _scan_keywords(
             break
         if progress:
             # 英字名でも検索するモデルは「カタカナ / 英字」の両方の検索語を表示する
-            progress(kw_index, total, " / ".join(kw_conf.get("search_queries") or [kw_conf["name"]]))
+            # （モデル名展開の検索で検索語が多いときは先頭だけ。検索中の語は仕入れ先の検索ごとに表示し直す）
+            qs = kw_conf.get("search_queries") or [kw_conf["name"]]
+            progress(kw_index, total, " / ".join(qs) if len(qs) <= 3 else f"{qs[0]} ほか検索語 {len(qs) - 1} 本")
         keyword              = kw_conf["name"]
         max_buy              = kw_conf["max_buy_price"]
         min_buy              = kw_conf.get("min_buy_price", 0)
@@ -235,7 +239,8 @@ def _scan_keywords(
         min_market_samples   = kw_conf.get("min_market_samples", 1)
 
         # 仕入れ先の検索語。ローカル画面でモデル名を選んだ場合は「カタカナ名」「英字名」の
-        # 2本が search_queries に入る（app.build_plan）。通常のキーワードは keyword の1本だけ
+        # 2本が search_queries に入る（app.build_plan）。モデル名展開の検索（search_all_models。タトラス）で
+        # モデルを選ばなかった場合は keyword + 全モデルの検索語が入る。通常のキーワードは keyword の1本だけ
         queries = [q for q in (kw_conf.get("search_queries") or [keyword]) if q]
         excl_str = f" 除外:{exclude_words}" if exclude_words else ""
         req_str  = f" 必須:{required_words}" if required_words else ""
@@ -243,7 +248,8 @@ def _scan_keywords(
         mdl_str  = " [型番照合]" if require_model_number else ""
         print(f"\n■ [{keyword}] 検索中... (¥{min_buy:,}〜¥{max_buy:,}){imm_str}{mdl_str}{excl_str}{req_str}")
         if len(queries) > 1:
-            print(f"  検索語: {' / '.join(queries)}")
+            shown = queries if len(queries) <= 6 else queries[:6] + [f"ほか{len(queries) - 6}本"]
+            print(f"  検索語 {len(queries)} 本: {' / '.join(shown)}")
 
         # required_words（明示設定）がなければブランド名（キーワード第1単語）を自動適用。
         # メルカリ相場検索にも同じ条件を使い、仕入れ候補と相場のカテゴリーを一致させる
@@ -304,13 +310,24 @@ def _scan_keywords(
             )),
         ]
         seen_item_urls: set[str] = set()
+        fetchers = [(k, f) for k, f in fetchers if sources is None or k in sources]
+        n_search = len(fetchers) * len(queries)   # このキーワードの検索の本数（仕入れ先 × 検索語）
+        search_no = 0
+        stopped = False
         for source_key, fetch in fetchers:
-            if sources is not None and source_key not in sources:
-                continue
             label = SOURCE_LABELS[source_key]
             for q in queries:
+                # 中止ボタンは検索語の切れ目でも効かせる（タトラスの全モデル×2表記×仕入れ先だと
+                # 1キーワードに数百本の検索があり、キーワードの切れ目だけでは長時間止まらないため）
+                if should_stop and should_stop():
+                    stopped = True
+                    break
+                search_no += 1
+                if progress and n_search > 1:
+                    progress(kw_index, total, f"{q}（{label}）", search_no - 1, n_search)
                 q_str = f" 「{q}」" if len(queries) > 1 else ""
-                print(f"  [{label}]{q_str} 検索中...")
+                no_str = f" ({search_no}/{n_search})" if n_search > len(fetchers) else ""
+                print(f"  [{label}]{q_str}{no_str} 検索中...")
                 fetched = fetch(q)
                 # 複数の検索語で同じ出品が出るため商品URLで重複を除く
                 new_items = []
@@ -324,6 +341,12 @@ def _scan_keywords(
                 print(f"  [{label}]{q_str} {len(fetched)} 件{dup_str}")
                 sources_items.extend(new_items)
                 time.sleep(1)
+            if stopped:
+                break
+        if stopped:
+            # 取得済みの分も照合しない（説明文・写真・相場の確認に時間がかかり、すぐ止まらないため）
+            print(f"\n[中断] ユーザー操作によりスキャンを中断しました（[{keyword}] 検索 {search_no}/{n_search} 本目まで）")
+            break
 
         # sekaist (2nd Street) disabled: Cloudflare WAF blocks all requests, no API alternative
 
@@ -335,16 +358,43 @@ def _scan_keywords(
         #    → 他ブランドやあいまいマッチによる誤混入を防ぐ
         if effective_required:
             before = len(sources_items)
-            # 大文字小文字は区別しない（THE NORTH FACE / The North Face など）。
-            # LV 等の短い英字は単語境界付きで照合する（SILVER の lv に一致させない。model_extractor.has_word）
-            sources_items = [
-                item for item in sources_items
-                if any(model_extractor.has_word(item.title, w) for w in effective_required)
-            ]
-            removed = before - len(sources_items)
+            # モデル名展開の検索（search_all_models。タトラス）では、required_words（ダウン等）が
+            # タイトルに無くても、ブランド名と登録済みのモデル名がタイトルにある出品は通す。
+            # 「タトラス ポリテアマ」で取れる出品は「TATRAS POLITEAMA ブラック 1」のようにダウンと書かれないことが
+            # 多いが、登録済みのモデルはすべてダウンのモデル（model_extractor._TATRAS_MODELS）のため。
+            # 相場（メルカリ売却済み）は従来どおり required_words を満たすものだけで出す。
+            # またモデル名展開の検索では、タイトルにブランド名（タトラス/TATRAS）が無い出品は除く。
+            # 検索語が多いぶん他ブランドの出品も混ざり（実例:「DUVETICA ARISTEO ダウンベスト」が
+            # 説明文のモデル名でドミツィアーノと判定された）、「ノコ」「タロ」等の短いモデル名だけでは判定できないため
+            all_models = bool(kw_conf.get("search_all_models"))
+            by_name = no_brand = 0
+
+            def passes(item) -> bool:
+                nonlocal by_name, no_brand
+                if all_models and not model_extractor.has_brand(item.title, brand_name):
+                    no_brand += 1
+                    return False
+                # 大文字小文字は区別しない（THE NORTH FACE / The North Face など）。
+                # LV 等の短い英字は単語境界付きで照合する（SILVER の lv に一致させない。model_extractor.has_word）
+                if any(model_extractor.has_word(item.title, w) for w in effective_required):
+                    return True
+                if not all_models:
+                    return False
+                name = model_extractor.extract_name(item.title, brand_name)
+                if name and model_extractor.name_fits(name, brand_name, category):
+                    by_name += 1
+                    return True
+                return False
+
+            sources_items = [item for item in sources_items if passes(item)]
+            removed = before - len(sources_items) - no_brand
+            if no_brand:
+                print(f"  [タイトルフィルター] {no_brand} 件除外 (ブランド名なし)")
             if removed > 0:
                 print(f"  [タイトルフィルター] {removed} 件除外 "
                       f"({'|'.join(effective_required)} なし)")
+            if by_name:
+                print(f"  [タイトルフィルター] {'|'.join(effective_required)} なしでもモデル名で通過 {by_name} 件")
 
         # 呼び出し元指定の追加条件（ローカル画面の「オークション残り時間」など）
         if item_filter is not None:
@@ -420,6 +470,9 @@ def _scan_keywords(
 
                 last_fetch: dict[str, float] = {}   # source → 前回取得時刻（取得間隔の確保用）
                 for it in pending:
+                    if should_stop and should_stop():
+                        stopped = True
+                        break
                     if it.source not in DESCRIPTION_FETCHERS or it.url in descriptions:
                         continue
                     if it.url in fetched:
@@ -436,6 +489,10 @@ def _scan_keywords(
 
                 database.cache_descriptions(fetched)
                 descriptions.update(fetched)
+                if stopped:
+                    # 説明文を取れなかった出品を写真の読み取り（有料の API）に回さないよう、ここで止める
+                    print(f"\n[中断] ユーザー操作によりスキャンを中断しました（[{keyword}] 説明文の確認中）")
+                    break
 
                 unresolved: list = []   # 説明文でも型番・モデル名が取れなかった出品（写真から品番を読む対象）
                 for item in pending:
@@ -472,6 +529,10 @@ def _scan_keywords(
             seen_models: set[str] = set()
 
             for item, model in candidates:
+                if should_stop and should_stop():
+                    # 相場を取得済みの案件は結果に残す（次のキーワードの切れ目で中断する）
+                    print(f"    [中断] 型番ごとの相場の確認を打ち切りました")
+                    break
                 # 型番の相場が無ければ、同じ出品のモデル名で相場を取り直す（fallback_names。タトラス）
                 tries = [model] + ([fallback_names[item.url]] if item.url in fallback_names else [])
                 for model in tries:
