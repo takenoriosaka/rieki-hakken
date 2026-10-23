@@ -138,16 +138,37 @@ def _fetch(search_query: str, max_price: int, min_price: int, count: int) -> lis
 
 def get_description(url: str) -> str | None:
     """商品詳細ページから説明文を取得する（タイトルに型番がない場合のフォールバック用）。
-    同じページの商品写真のURLも控えておく（get_image_urls で再取得せずに使う）。"""
+    同じページの商品写真のURLも控えておく（get_image_urls で再取得せずに使う）。
+
+    ページ内の #description は表示用に途中（50文字前後）で「...」と省略されている
+    （__NEXT_DATA__ の item.description も同じく省略版）。全文は __NEXT_DATA__ の
+    item.descriptionHtml（出品者が書いたHTML）にあるので、そこからタグを除いたテキストを返す。
+    ログインなしの requests で取得できることを確認済み（2026-10時点）。
+    旧形式のページ（__NEXT_DATA__ が無い・構造が違う）は従来どおり #description から取る。
+    """
     try:
         resp = _get(url)
         _remember_images(url, resp.text)
+        desc = _parse_description(resp.text)
+        if desc is not None:
+            return desc
         soup = BeautifulSoup(resp.text, "lxml")
         el = soup.select_one("#description")
-        return el.get_text(strip=True) if el else None
+        return el.get_text("\n", strip=True) if el else None
     except Exception as e:
         print(f"[Yahoo Auctions] 説明文取得エラー ({url}): {e}")
         return None
+
+
+def _parse_description(html: str) -> str | None:
+    """__NEXT_DATA__ の item.descriptionHtml（説明文の全文）をテキストにして返す。無ければ None。"""
+    item = _next_data_item(html)
+    desc_html = (item or {}).get("descriptionHtml")
+    if not isinstance(desc_html, str):
+        return None
+    # 表示用のタグ（TABLE/FONT/IMG 等）を除く。行・セルの区切りは改行にして、
+    # 前後の文字と品番がくっつかないようにする（型番の正規表現の \b が効くように）
+    return BeautifulSoup(desc_html, "lxml").get_text("\n", strip=True)
 
 
 # 説明文の取得時に同じページから取った商品写真のURL（商品URL → 写真URLの一覧）。
@@ -178,6 +199,16 @@ def _remember_images(url: str, html: str) -> None:
 
 
 def _parse_images(html: str) -> list[str] | None:
+    imgs = (_next_data_item(html) or {}).get("img")
+    if not isinstance(imgs, list):
+        return None
+    urls = [d.get("image") for d in imgs if isinstance(d, dict) and d.get("image")]
+    return list(dict.fromkeys(urls))
+
+
+def _next_data_item(html: str) -> dict | None:
+    """商品詳細ページの __NEXT_DATA__ から商品情報（initialState.item.detail.item）を返す。
+    写真URL・説明文の全文はここにある。無い・構造が想定外なら None。"""
     m = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.S)
     if not m:
         return None
@@ -187,10 +218,9 @@ def _parse_images(html: str) -> list[str] | None:
         return None
     # pageProps 配下と props 直下の両方に同じものがある（どちらかが無くなっても動くように）
     for state in (props.get("pageProps", {}).get("initialState"), props.get("initialState")):
-        imgs = (((state or {}).get("item") or {}).get("detail") or {}).get("item", {}).get("img")
-        if isinstance(imgs, list):
-            urls = [d.get("image") for d in imgs if isinstance(d, dict) and d.get("image")]
-            return list(dict.fromkeys(urls))
+        item = (((state or {}).get("item") or {}).get("detail") or {}).get("item")
+        if isinstance(item, dict):
+            return item
     return None
 
 

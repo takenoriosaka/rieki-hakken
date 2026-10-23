@@ -92,6 +92,14 @@ def init_db():
             WHERE base_keyword = ''
         """)
 
+        # ヤフオクの説明文キャッシュの取り直し（2026-10-23）: それまでは表示用に途中で省略された
+        # 説明文（50文字前後）を保存していたため、修正前に取得した分を消して全文で取り直させる。
+        # 日時で区切るので2回目以降は no-op（修正後に取得した分は消さない）
+        conn.execute(
+            "DELETE FROM description_cache "
+            "WHERE url LIKE 'https://auctions.yahoo.co.jp/%' AND fetched_at < '2026-10-23T13:00:00'"
+        )
+
 
 def _ensure_column(conn, table, column, coltype_and_default):
     """指定テーブルに列が無ければ ALTER TABLE で追加する（冪等）。"""
