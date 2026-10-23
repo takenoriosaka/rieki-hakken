@@ -332,7 +332,12 @@ def _deal_matches_model(deal, model: str, aliases: dict[str, list[str]]) -> bool
     # （「ヌプシジャケット」を選んだときに「ショートヌプシ」を含めない）
     if deal.model and model_extractor.is_strict_brand(deal.brand):
         want = model_extractor.extract(model, deal.brand) or model
-        return _norm(deal.model) == _norm(want)
+        if _norm(deal.model) == _norm(want):
+            return True
+        # タトラス: 品番で照合した出品も、タイトルのモデル名が選んだモデルなら含める
+        if model_extractor.name_fallback(deal.brand):
+            return model_extractor.extract_name(deal.item.title, deal.brand) == want
+        return False
     if deal.model and (model_extractor.model_names(deal.model, deal.brand)[0]
                        == model_extractor.model_names(model, deal.brand)[0]):
         return True

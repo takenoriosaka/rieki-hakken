@@ -87,7 +87,16 @@ _PATTERNS: dict[str, list[str]] = {
         r'(?<![A-Za-z0-9])H[A-Z]{2}[\s\-]?\d{3}(?!\d)',
     ],
     "タトラス": [
-        r'(?<![A-Za-z0-9])[LM]TA\d{2}[A-Z]?\d{3,5}(?:-[A-Z0-9]+)?(?![A-Za-z0-9])',  # LTA13A4301, MTA13S4213, LTA1654530
+        # 品番は L(レディース)/M(メンズ) + 系統(TA・TAT・TK・TKE・TLA・TSE) + 年2桁 + A(秋冬)/S(春夏) + 品番3〜4桁
+        # （5桁は誤記と思われるが、変更前の正規表現どおり拾う）。
+        # 例: LTA13A4301, MTA15S4468, MTK20A4201, MTK18A453, MTAT21A4754-D, LTKE21A4164-D, MTLA21A4140-D。
+        # 別注品・旧品番は 年1桁 + 店コード2文字（LTA2BM4694=BEAMS, LTA6RB4349=ROSE BUD, MTA7TM499=TOMORROWLAND）。
+        # メルカリの表記ゆれ: lta13a4301 / LTA-13A-4301 / LTA14A 4571 / 末尾の -D・-M・-L（種別コード）
+        # → _normalize_tatras で LTA13A4301 の形に整える（メルカリ売却済み 2026-10 確認）
+        # 直前の数字は許す（「2020LTA20A4794-D」のように年と続けて書く出品があるため）
+        r'(?<![A-Za-z])[LM]T(?:AT|KE|LA|SE|A|K)[\s\-]?(?:\d{2}[AS]|\d[A-Z]{2})[\s\-]?\d{3,5}(?!\d)',
+        # 2012年頃までの旧品番: MTA-460-12 / LTA-4173-12（品番 + 年2桁。ハイフン区切りのまま型番とする）
+        r'(?<![A-Za-z])[LM]TA[\s\-]\d{3,4}[\s\-]\d{2}(?!\d)',
     ],
     "ノースフェイス": [
         # ND/NDW=ダウン、NY/NYW・NP/NPW=シェル系。メルカリの表記ゆれ: ND91950 / nd91950 /
@@ -99,6 +108,8 @@ _PATTERNS: dict[str, list[str]] = {
 
 # 抽出結果からハイフンも取り除くブランド（ND-91950 → ND91950）
 _STRIP_HYPHEN_BRANDS = {"ノースフェイス", "ピレネックス"}
+# 型番の照合前に全角英数字を整える（NFKC）ブランド（ＬＴＡ１３Ａ４３０１ 等の全角表記も拾う）
+_NFKC_NUMBER_BRANDS = {"タトラス"}
 
 # ── レイバン: 仕入れ対象の代表型番と愛称（メルカリ売却済みで相場が付くもの。2026-10 確認）──
 # 画面の「型番の候補」に「RB2140 ウェイファーラー」のように愛称付きで出す（愛称が無いものは空文字）。
@@ -113,6 +124,15 @@ def _normalize_rayban(s: str) -> str:
     if not m:
         return s.upper()
     return f"RB{m.group(1)}{m.group(2) or ''}"
+
+
+def _normalize_tatras(s: str) -> str:
+    """タトラス品番の表記ゆれを整える: lta-13a-4301 / LTA14A 4571 → LTA13A4301 / LTA14A4571、
+    旧品番 mta 460 12 → MTA-460-12（末尾の種別コード -D 等は正規表現の一致範囲に含めない）"""
+    m = re.fullmatch(r'([LM]TA)[\s\-](\d{3,4})[\s\-](\d{2})', s.upper())
+    if m:
+        return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    return re.sub(r'[\s\-]+', '', s).upper()
 
 
 # ── モデル名（コレクション名）で照合するブランド ────────────────────────
@@ -666,10 +686,106 @@ _TIFFANY_MODELS: list[tuple[str, str, list[str]]] = [
 _STRICT_MODELS["ティファニー"] = [(name, pats) for name, _en, pats in _TIFFANY_MODELS]
 _STRICT_EN.update({name: en for name, en, _pats in _TIFFANY_MODELS})
 
+
+# ── タトラス: モデル名（品番 LTA13A4301 等が無い出品だけモデル名で照合する）──────────────
+# メルカリ売却済み（ログインなし。2026-10 調査: 134回検索・タトラスのタイトル 3,909件）で
+# ダウンの売却が4件以上あったモデル。品番がタイトルに載る出品は売却済みの約3%しかないため、
+# モデル名を主に照合する。モデル名は男女で別の名前なので、性別では分けない。
+# 派生モデルを先に判定する（右の件数はダウンの売却件数・中央値）:
+#   エンリ（ドミツィアーノのナイロン版。「ドミツィアーノ エンリ」と書かれる）29件 ¥100,000 ← ドミツィアーノ 77件 ¥65,100
+#   ドミツィアーノ シルク（シルク混）24件 ¥82,500 は通常のドミツィアーノと別モデルにする
+#   オルサバ（コサヴァの別注版。「別注KOSAVA オルサバ」と書かれる）14件 ¥94,000 ← コサヴァ 82件 ¥67,950
+#   クラッツ（ベルボの前身。「KRAZ ベルボ同型」と書かれる）108件 ¥34,450 ← ベルボ 97件 ¥53,000
+#   アカシア（ノコの別注版。「NOKO ACACIA」と書かれる）24件 ¥36,500 ← ノコ 69件 ¥49,800
+# Rライン（上位ライン）はチーマ・ドミツィアーノで通常品と相場がほぼ同じ（¥41,500 / ¥46,000 等）なので分けない。
+# 類似品（「タトラス風」「TATRAS系」「ポリテアマ風」等）は除く。半角カナ（ﾎﾟﾘﾃｱﾏ）は NFKC で整えてから照合する
+# 「ポリテアマ風」「ベルボと同じ形」「ベルボ同型」等（そのモデルそのものではない）と、
+# 「ロコちゃん様専用」「タロ様」等の購入者名を除く
+_TT_NF = r'(?!\s*(?:風|似|タイプ|系|と同じ|と同型|同型|みたい|のよう|っぽ|様|さん|ちゃん|くん))'
+_TT_NOT_LIKE = r'(?s)^(?!.*(?:タトラス|TATRAS)\s*(?:風|似|タイプ|系|っぽ|好き))'   # 「タトラス風 ダウン」等
+_KB = r'(?<![ァ-ヶー])'                                                     # 直前がカタカナでない
+_KE = r'(?![ァ-ヶー])'                                                      # 直後がカタカナでない
+
+
+def _tt(canon: str, en: str, kana: str, eng: str, cond: str = "") -> list[tuple[str, str, list[str]]]:
+    """タトラスのモデル。kana / eng: 正規表現（英字は前後に英字が続かないこと）。
+    cond: タイトル全体の条件（ドミツィアーノ シルクのシルク等）"""
+    pats = [r'(?:' + kana + r')' + _TT_NF, _A + r'(?:' + eng + r')' + _Z + _TT_NF]
+    return [(canon, en, [_TT_NOT_LIKE + cond + r'(?=.*?(?:' + p + r'))' for p in pats])]
+
+
+_TT_DOMIZIANO = (r'ドミッ?ツィ?アーノ', r'DOMIZIANO')
+_TT_SILK = r'(?=.*(?:シルク|' + _A + r'SILK' + _Z + r'))'
+
+_TATRAS_MODELS: list[tuple[str, str, list[str]]] = [
+    # ── 派生モデル（親モデルより先に判定）──
+    *_tt("エンリ", "ENRI", _KB + r'エンリ' + _KE, r'ENRI'),                                       # 29件 ¥100,000
+    # 正規名は空白入り（メルカリ等の検索語「タトラス ドミツィアーノ シルク」にするため。照合は空白を無視する）
+    *_tt("ドミツィアーノ シルク", "DOMIZIANO SILK", *_TT_DOMIZIANO, cond=_TT_SILK),              # 24件 ¥82,500
+    *_tt("ドミツィアーノ", "DOMIZIANO", *_TT_DOMIZIANO),                                          # 77件 ¥65,100
+    *_tt("オルサバ", "OLSAVA", r'オルサ[バヴ]ァ?', r'O[LR]SAVA'),                                # 14件 ¥94,000
+    *_tt("コサヴァ", "KOSAVA", r'コサ[ヴバ]ァ?', r'KOSAVA'),                                      # 82件 ¥67,950
+    *_tt("クラッツ", "KRAZ", r'クラッツ|クラーズ', r'KRAZ'),                                      # 108件 ¥34,450
+    *_tt("ベルボ", "BELBO", r'ベルボ(?!トム)', r'BELBO'),                                         # 97件 ¥53,000
+    # ── レディース ──
+    *_tt("アカシア", "ACACIA", r'アカシア|アカッチャ', r'ACACIA'),                               # 24件 ¥36,500
+    *_tt("ポリテアマ", "POLITEAMA", r'ポリテア?ー?マ|ポリアテマ|ポルテアマ', r'POLITEAMA'),        # 129件 ¥38,000
+    *_tt("ラビアナ", "LAVIANA", r'ラ[ビヴ]ィ?アナ', r'LAVIANA'),                                   # 98件 ¥46,040
+    *_tt("ヴァレナ", "VARENA", r'ヴァレナ|' + _KB + r'バレナ', r'VARENA'),                         # 79件 ¥61,000
+    *_tt("バビラ", "BABILA", r'バビラ', r'BABILA'),                                               # 66件 ¥23,250
+    *_tt("サルマ", "SARMA", _KB + r'サルマ' + _KE, r'SARMA'),                                     # 57件 ¥70,000
+    *_tt("ノコ", "NOKO", _KB + r'ノコ' + _KE, r'NOKO'),                                           # 69件 ¥49,800
+    *_tt("チーマ", "CIMA", _KB + r'チーマ' + _KE, r'CIMA'),                                       # 60件 ¥43,950
+    *_tt("サリン", "SARIN", _KB + r'サリン' + _KE, r'SARIN'),                                     # 51件 ¥18,200
+    *_tt("アゴーニャ", "AGOGNA", r'アゴーニャ', r'AGOGNA|AGONA'),                                 # 50件 ¥21,000
+    *_tt("クルサ", "CURSA", _KB + r'クルサ' + _KE, r'CURSA'),                                     # 39件 ¥23,000
+    *_tt("ロレンツァーナ", "LORENZANA", r'ロレンツァーナ', r'LORENZANA'),                         # 37件 ¥23,760
+    *_tt("スピノサ", "SPINOSA", r'スピノサ', r'SPINOSA'),                                         # 38件 ¥35,750
+    *_tt("ルセラ", "LUSERA", _KB + r'ルセラ' + _KE, r'LUSERA'),                                   # 30件 ¥30,000
+    *_tt("イセラ", "ISERA", _KB + r'イセラ' + _KE, r'ISERA'),                                     # 30件 ¥38,950
+    *_tt("オルシエラ", "ORSIERA", r'オルシエラ', r'ORSIERA'),                                     # 28件 ¥37,750
+    *_tt("スペランツァ", "SPERANZA", r'スペランツァ', r'SPERANZA'),                               # 22件 ¥38,500
+    *_tt("フォンド", "FONDO", _KB + r'フォンド' + _KE, r'FONDO'),                                 # 17件 ¥50,000
+    *_tt("サッビア", "SABBIA", r'サッビア', r'SABBIA'),                                           # 13件 ¥40,000
+    *_tt("プリムラ", "PRIMULA", r'プリムラ', r'PRIMULA'),                                         # 7件 ¥38,000
+    *_tt("ゼヤ", "ZEJA", _KB + r'ゼ[ヤジ]ャ?' + _KE, r'ZEJA'),                                    # 6件 ¥34,950
+    *_tt("サブリナ", "SABRINA", r'サブリナ', r'SABRINA'),                                         # 20件 ¥27,000
+    *_tt("コルマ", "COLMA", _KB + r'コルマ' + _KE, r'COLMA'),                                     # 35件 ¥25,000
+    *_tt("アリセオ", "ALISEO", r'アリセオ', r'ALISEO'),                                           # 9件 ¥31,000
+    *_tt("ロコ", "LOKO", _KB + r'ロコ' + _KE, r'LOKO'),                                           # 5件 ¥40,000
+    *_tt("アレン", "AREN", _KB + r'アレン' + _KE, r'AREN'),                                       # 5件 ¥30,000
+    # ── メンズ ──
+    *_tt("ボルボレ", "BORBORE", r'ボルボレ', r'BORBORE'),                                         # 101件 ¥46,000
+    *_tt("アゴルド", "AGORDO", r'アゴルド', r'AGORDO'),                                           # 92件 ¥47,250
+    *_tt("ジェッソ", "GESSO", r'ジェッソ', r'GESSO'),                                             # 82件 ¥35,000
+    *_tt("ポセイドーネ", "POSEIDONE", r'ポセイドー?ネ|ポセイドン', r'POSEIDONE'),                 # 77件 ¥36,000
+    *_tt("ボエシオ", "BOESIO", r'ボエシオ', r'BOESIO'),                                           # 60件 ¥38,650
+    *_tt("セラミカ", "CERAMICA", r'セラミカ', r'CERAMICA'),                                       # 34件 ¥38,750
+    *_tt("ブレヴァ", "BREVA", r'ブレ[ヴバ]ァ?' + _KE, r'BREVA'),                                  # 32件 ¥47,450
+    *_tt("クローネ", "CURONE", _KB + r'クローネ' + _KE, r'CURONE'),                               # 32件 ¥33,250
+    *_tt("ディオメデ", "DIOMEDE", r'ディオメデ', r'DIOMEDE'),                                     # 27件 ¥37,500
+    *_tt("グラミ", "GRAMI", _KB + r'グラミ' + _KE, r'GRAMI'),                                     # 18件 ¥69,700
+    *_tt("アヴェチ", "AVECI", r'アヴェチ', r'AVECI'),                                             # 17件 ¥80,000
+    *_tt("フォラート", "FORATO", r'フォラート', r'FORATO'),                                       # 16件 ¥31,500
+    *_tt("ケイティー", "KEITIE", r'ケイティー?', r'KEITIE'),                                      # 15件 ¥79,800
+    *_tt("シツィオ", "CIZIO", r'シツィオ', r'CIZIO'),                                             # 13件 ¥139,800
+    *_tt("オソド", "OSODO", r'オソド', r'OSODO'),                                                 # 12件 ¥82,000
+    *_tt("エルコーレ", "ERCOLE", r'エルコーレ', r'ERCOLE'),                                       # 12件 ¥30,600
+    *_tt("ブレッジョ", "BLEGGIO", r'ブレッ?ー?ジョ', r'BLEGGIO'),                                 # 11件 ¥46,000
+    *_tt("デメトリオ", "DEMETRIO", r'デメトリオ', r'DEMETRIO'),                                   # 11件 ¥50,000
+    *_tt("カシマーゾ", "CASSIMASO", r'カシマーゾ', r'CASSIMASO'),                                 # 9件 ¥86,000
+    *_tt("イザール", "IZAR", r'イザール', r'IZAR'),                                               # 9件 ¥22,980
+    *_tt("タロ", "TARO", _KB + r'タロ' + _KE, r'TARO'),                                           # 6件 ¥50,000
+    *_tt("サルガス", "SARGAS", r'サルガス', r'SARGAS'),                                           # 20件 ¥29,400
+    *_tt("ディナンド", "DINANDO", r'ディナンド', r'DINANDO'),                                     # 4件 ¥79,100
+]
+_STRICT_MODELS["タトラス"] = [(name, pats) for name, _en, pats in _TATRAS_MODELS]
+_STRICT_EN.update({name: en for name, en, _pats in _TATRAS_MODELS})
+
 # モデル名の照合をこのジャンルに限るブランド（ルイヴィトンのサングラスにバッグのモデル名を使わない）
 _NAME_CATEGORIES = {"ルイヴィトン": "バッグ"}
 # モデル名の照合前に全角英数字等を整える（NFKC）ブランド
-_NFKC_NAME_BRANDS = {"ルイヴィトン", "ティファニー"}
+_NFKC_NAME_BRANDS = {"ルイヴィトン", "ティファニー", "タトラス"}
 
 for _brand, _models in _STRICT_MODELS.items():
     _MODEL_NAMES[_brand] = [x for _name, _ in _models for x in (_name, _STRICT_EN[_name])]
@@ -713,6 +829,15 @@ _STRICT_NAME_KEYS = {
     b: {_k: name for name, _ in _STRICT_MODELS[b] for _k in (name, _STRICT_EN[name])}
     for b in _TITLE_RULES
 }
+
+
+# 型番の相場が取れないときに、同じ出品のモデル名で相場を取り直すブランド（main.py）。
+# タトラスは品番が売却済みのタイトルに載ることが少なく（約3%）、品番で検索すると0件になりやすいため
+_NAME_FALLBACK_BRANDS = {"タトラス"}
+
+
+def name_fallback(brand: str) -> bool:
+    return brand in _NAME_FALLBACK_BRANDS
 
 
 def uses_description(brand: str) -> bool:
@@ -1219,6 +1344,8 @@ BRAND_ALIASES: dict[str, list[str]] = {
     "バレンシアガ": ["バレンシアガ", "BALENCIAGA"],
     # HERNO は「Chernobyl」等に部分一致するため、前後に英字が続かないときだけ一致とする（_WORD_ALIASES）
     "ヘルノ": ["ヘルノ", "HERNO"],
+    # 英字だけのタイトル（TATRAS POLITEAMA 等）もメルカリ相場のブランド名チェックを通るようにする
+    "タトラス": ["タトラス", "TATRAS"],
 }
 
 # 前後に英字が続かないときだけ一致とする表記（単語境界付きで照合する）。ここに無い表記は従来どおり部分一致
@@ -1418,11 +1545,15 @@ def extract(title: str, brand: str = "", category: str = "") -> str | None:
     special = _CATEGORY_EXTRACTORS.get((brand, category))
     if special is not None:
         return special(title)
+    if brand in _NFKC_NUMBER_BRANDS:
+        title = unicodedata.normalize("NFKC", title or "")
     for pattern in _PATTERNS.get(brand, []):
         match = re.search(pattern, title, re.IGNORECASE)
         if match:
             if brand == "レイバン":
                 return _normalize_rayban(match.group(0))
+            if brand == "タトラス":
+                return _normalize_tatras(match.group(0))
             sep = r'[\s\-]+' if brand in _STRIP_HYPHEN_BRANDS else r'\s+'
             return re.sub(sep, '', match.group(0)).upper()
 

@@ -345,13 +345,30 @@ def _scan_keywords(
 
             candidates: list[tuple] = []   # (item, model)
             pending: list = []             # タイトルで型番なし→説明文を確認する対象
+            # 型番の相場が無いときに代わりに使うモデル名（item.url → モデル名）。
+            # 品番がタイトルに載ることが少ないブランド（タトラス）だけ。model_extractor.name_fallback 参照
+            fallback_names: dict[str, str] = {}
+            # タイトルでモデル名だけが取れた出品（item.url → モデル名）。name_fallback のブランド（タトラス）は
+            # 型番を優先するため、説明文に品番があるかも確認する
+            title_names: dict[str, str] = {}
+
+            def remember_name(item, text: str, model: str):
+                if not model_extractor.name_fallback(brand_name):
+                    return
+                name = model_extractor.extract_name(text, brand_name)
+                if name and name != model:
+                    fallback_names[item.url] = name
 
             for item in sources_items:
                 if item.price < min_buy:
                     continue
                 model = model_extractor.extract(item.title, brand_name, category)
-                if model:
+                if model and model_extractor.name_fallback(brand_name) \
+                        and model_extractor.extract_name(model, brand_name) == model:
+                    title_names[item.url] = model
+                elif model:
                     candidates.append((item, model))
+                    remember_name(item, item.title, model)
                 else:
                     pending.append(item)
 
@@ -360,6 +377,9 @@ def _scan_keywords(
             if pending and not model_extractor.uses_description(brand_name):
                 print(f"    タイトルで対象モデルなし {len(pending)}件 → 除外（タイトルのみで照合）")
                 pending = []
+            if title_names:
+                print(f"    タイトルでモデル名のみ {len(title_names)}件 → 商品説明文の品番も確認します")
+                pending += [it for it in sources_items if it.url in title_names]
             if pending:
                 print(f"    タイトルで型番なし {len(pending)}件 → 商品説明文を確認中...")
                 # 説明文は DB にキャッシュし、DESCRIPTION_CACHE_HOURS 以内に取得済みの
@@ -400,59 +420,78 @@ def _scan_keywords(
 
                 for item in pending:
                     desc = descriptions.get(item.url)
+                    title_name = title_names.get(item.url)
+                    if title_name:
+                        # 説明文に品番があれば品番を優先し、タイトルのモデル名は品番の相場が無いときに使う
+                        model = model_extractor.extract(desc, brand_name, category) if desc else None
+                        if model and model_extractor.extract_name(model, brand_name) != model:
+                            candidates.append((item, model))
+                            fallback_names[item.url] = title_name
+                        else:
+                            candidates.append((item, title_name))
+                        continue
                     if not desc:
                         continue
                     model = model_extractor.extract(desc, brand_name, category)
                     if model:
                         candidates.append((item, model))
+                        remember_name(item, desc, model)
 
             model_deals = []
             seen_models: set[str] = set()
 
             for item, model in candidates:
-                model_key = model_extractor.normalize(model)
-                model_keyword = f"{brand_name} {model}"
+                # 型番の相場が無ければ、同じ出品のモデル名で相場を取り直す（fallback_names。タトラス）
+                tries = [model] + ([fallback_names[item.url]] if item.url in fallback_names else [])
+                for model in tries:
+                    model_key = model_extractor.normalize(model)
+                    model_keyword = f"{brand_name} {model}"
 
-                # 同型番の相場は1回だけ取得（キャッシュ活用）
-                if model_key not in seen_models:
-                    seen_models.add(model_key)
+                    # 同型番の相場は1回だけ取得（キャッシュ活用）
+                    if model_key not in seen_models:
+                        seen_models.add(model_key)
 
-                # モデル名（型番でないもの）は、売却済みタイトルも同じモデルと判定されるものだけで
-                # 相場を出す（ディオニシオ に ディオニシオドゥエ、ヌプシジャケット に ショートヌプシ、
-                # ビーゼロワン に セーブザチルドレン を混ぜない）。
-                # さらにカタカナ名・英字名の両方で売却済みを取得し、商品URLで重複を除いて合算する
-                # （例: デュベティカ「フェーベ」はタイトルの多くが FEBE 表記）。
-                # 英字名が無い・同じ表記のモデルは1回だけ検索する。
-                name_filter, filter_key, alt_keywords = None, "", None
-                canon = model_extractor.extract_name(model, brand_name)
-                if canon == model:
-                    name_filter = (lambda t, _m=model, _b=brand_name:
-                                   model_extractor.extract_name(t, _b) == _m)
-                    filter_key = f"model:{model}"
-                    names = model_extractor.search_names(model, brand_name)
-                    model_keyword = f"{brand_name} {names[0]}"
-                    alt_keywords = [f"{brand_name} {n}" for n in names[1:]]
-                elif model_extractor.exact_number_market(brand_name, category):
-                    # 型番の相場も同じ型番の売却済みだけで出す（レイバン: RB2140 に RB2140F を混ぜない、
-                    # グッチ時計: 「グッチ 1500L」の検索結果に混ざる 1400L・1900L を除く）
-                    name_filter = (lambda t, _m=model, _b=brand_name, _c=category:
-                                   model_extractor.extract(t, _b, _c) == _m)
-                    filter_key = f"model:{model}"
+                    # モデル名（型番でないもの）は、売却済みタイトルも同じモデルと判定されるものだけで
+                    # 相場を出す（ディオニシオ に ディオニシオドゥエ、ヌプシジャケット に ショートヌプシ、
+                    # ビーゼロワン に セーブザチルドレン を混ぜない）。
+                    # さらにカタカナ名・英字名の両方で売却済みを取得し、商品URLで重複を除いて合算する
+                    # （例: デュベティカ「フェーベ」はタイトルの多くが FEBE 表記）。
+                    # 英字名が無い・同じ表記のモデルは1回だけ検索する。
+                    name_filter, filter_key, alt_keywords = None, "", None
+                    canon = model_extractor.extract_name(model, brand_name)
+                    if canon == model:
+                        name_filter = (lambda t, _m=model, _b=brand_name:
+                                       model_extractor.extract_name(t, _b) == _m)
+                        filter_key = f"model:{model}"
+                        names = model_extractor.search_names(model, brand_name)
+                        model_keyword = f"{brand_name} {names[0]}"
+                        alt_keywords = [f"{brand_name} {n}" for n in names[1:]]
+                    elif model_extractor.exact_number_market(brand_name, category):
+                        # 型番の相場も同じ型番の売却済みだけで出す（レイバン: RB2140 に RB2140F を混ぜない、
+                        # グッチ時計: 「グッチ 1500L」の検索結果に混ざる 1400L・1900L を除く）
+                        name_filter = (lambda t, _m=model, _b=brand_name, _c=category:
+                                       model_extractor.extract(t, _b, _c) == _m)
+                        filter_key = f"model:{model}"
 
-                model_market = analyzer.get_market_price(
-                    page,
-                    model_keyword,
-                    sample_count=settings["mercari_sold_sample_count"],
-                    cache_hours=settings["price_cache_hours"],
-                    exclude_words=exclude_words,
-                    required_words=effective_required,
-                    title_filter=name_filter,
-                    filter_key=filter_key,
-                    alt_keywords=alt_keywords,
-                    min_samples=min_market_samples,
-                )
-                if model_market is None:
+                    model_market = analyzer.get_market_price(
+                        page,
+                        model_keyword,
+                        sample_count=settings["mercari_sold_sample_count"],
+                        cache_hours=settings["price_cache_hours"],
+                        exclude_words=exclude_words,
+                        required_words=effective_required,
+                        title_filter=name_filter,
+                        filter_key=filter_key,
+                        alt_keywords=alt_keywords,
+                        min_samples=min_market_samples,
+                    )
+                    if model_market is not None:
+                        break
+                    if model != tries[-1]:
+                        print(f"    [{model}] メルカリ相場なし → モデル名 {tries[-1]} で照合")
+                        continue
                     print(f"    [{model}] メルカリ相場なし → スキップ")
+                else:
                     continue  # メルカリで型番確認できず → スキップ
 
                 deal = analyzer.calculate_deal(
