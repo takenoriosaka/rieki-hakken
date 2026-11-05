@@ -40,6 +40,11 @@ class Deal:
     model: str = ""
     category: str = ""
     search_keyword: str = ""   # この案件を見つけた検索キーワード（型番照合時も元のキーワード）
+    # 相場（状態補正前の中央値など）。写真で状態を確認したあと利益を計算し直すために持つ
+    market: Optional[MarketPrice] = None
+    # 写真から判定した状態（photo_reader。rank / issues / confidence / unchecked）。未確認なら None
+    photo_condition: Optional[dict] = None
+    text_condition_label: str = ""   # タイトルから判定した状態（写真の判定と組み合わせる前）
 
     def format_source(self) -> str:
         labels = {

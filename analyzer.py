@@ -200,8 +200,10 @@ def calculate_deal(
     commission_rate: float = 0.10,
     shipping_cost: int = 700,
     min_profit: int = 3000,
+    condition=None,
 ) -> Optional[Deal]:
-    """仕入れアイテムとメルカリ相場を比較して利益を計算する。"""
+    """仕入れアイテムとメルカリ相場を比較して利益を計算する。
+    condition: 状態（condition_checker.ConditionResult）。省略時はタイトルから判定する"""
     # ── 価格サニティチェック ──────────────────────────────────
     # 仕入れ値が中央値の20%未満 = 相場と乖離しすぎ
     # → レプリカ・別カテゴリー誤混入・激しい破損品の可能性が高い
@@ -210,8 +212,14 @@ def calculate_deal(
     if item.price < market.median_price * SANITY_RATIO:
         return None
 
-    # 商品状態をタイトルから判定
-    cond = condition_checker.check(item.title)
+    # 商品状態をタイトルから判定（condition を渡されたら＝写真の判定と組み合わせ済みならそれを使う）
+    text_cond = condition_checker.check(item.title)
+    cond = condition or text_cond
+    # 写真で状態を確認する予定のスキャン（photo_reader）では、タイトルで状態不明の出品も
+    # 「目立った傷なし」（1.00）と仮定して候補に残す。写真の確認後に main.py で計算し直す
+    # （写真が確認できなかった出品はタイトルの状態＝0.90 で計算し直すので、仮定のまま残ることはない）
+    if condition is None and _flags["photo_check"] and condition_checker.is_unknown(text_cond):
+        cond = condition_checker.ConditionResult(text_cond.label, 1.00, text_cond.rank)
 
     # 中央値 × 状態補正係数 = 販売推定価格
     # 例: 中央値¥50,000 × 美品1.05 = ¥52,500
@@ -235,7 +243,34 @@ def calculate_deal(
         roi_percent=round(roi, 1),
         condition_label=cond.label,
         condition_factor=cond.factor,
+        market=market,
+        text_condition_label=text_cond.label,
     )
+
+
+# 写真で状態を確認するスキャンか（main.scan() が photo_reader の有効/無効に合わせて設定する）
+_flags = {"photo_check": False}
+
+
+def set_photo_check(on: bool) -> None:
+    _flags["photo_check"] = bool(on)
+
+
+def apply_photo_condition(deal: Deal, photo: Optional[dict], commission_rate: float,
+                          shipping_cost: int, min_profit: int) -> Optional[Deal]:
+    """写真の状態判定（photo。None なら未確認）とタイトルの状態を保守的に組み合わせて利益を計算し直す。
+    利益が min_profit を下回れば None"""
+    if deal.market is None:
+        return deal
+    cond = condition_checker.combine(condition_checker.check(deal.item.title), photo)
+    new = calculate_deal(deal.item, deal.keyword, deal.market, commission_rate=commission_rate,
+                         shipping_cost=shipping_cost, min_profit=min_profit, condition=cond)
+    if new is None:
+        return None
+    new.brand, new.model, new.category = deal.brand, deal.model, deal.category
+    new.search_keyword = deal.search_keyword
+    new.photo_condition = photo
+    return new
 
 
 def find_deals(

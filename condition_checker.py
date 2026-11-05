@@ -90,3 +90,54 @@ def check(title: str) -> ConditionResult:
         if any(kw in title for kw in keywords):
             return result
     return _DEFAULT
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# 写真からの状態判定（photo_reader）とタイトルの状態の組み合わせ
+# ──────────────────────────────────────────────────────────────────────────────
+
+# 写真から判定した状態のランク（photo_reader が Claude に5段階で答えさせる）→ 補正係数。
+# 写真の AI 判定は出品者の自己申告より厳しめ（袖口のテカり・糸くず程度でも「やや傷あり」と答える）で、
+# メルカリ売却済みの中央値（基準 1.00）にもその程度の使用感の中古品が多く含まれるため、
+# タイトル判定の表より一段ゆるい係数にする（2026-11 の実スキャンで、やや傷あり=0.70 だと
+# 中古の案件の約6割が利益不足で外れた）。
+#   目立った傷なし 1.00 / やや傷あり 0.85 / 傷あり 0.70（タイトルの「やや傷」相当）/ 状態悪い 0.45
+# 「新品同様」は写真だけでは未使用かどうか分からないため、写真だけでは 1.00 より上げない。
+# タイトルに「新品」「未使用に近い」等とあり写真も「新品同様」なら、タイトルの係数のまま（下の combine 参照）
+PHOTO_RANKS: dict[str, tuple[float, int]] = {
+    "新品同様":       (1.00, 8),
+    "目立った傷なし": (1.00, 6),
+    "やや傷あり":     (0.85, 4),
+    "傷あり":         (0.70, 3),
+    "状態悪い":       (0.45, 1),
+}
+PHOTO_RANK_ORDER = list(PHOTO_RANKS)
+_DEFAULT_PHOTO_CLEAN = 1.00   # 写真で傷・汚れが見つからなかったランク（新品同様・目立った傷なし）の係数
+
+
+def combine(text: ConditionResult, photo: dict | None) -> ConditionResult:
+    """タイトルの状態（text）と写真の状態（photo = photo_reader の判定結果）を保守的に組み合わせる。
+    ・写真の判定が無い → タイトルのまま
+    ・タイトルに状態の記載あり → 悪いほう（係数が小さいほう）。写真で傷・汚れが見つからなければタイトルのまま
+    ・タイトルが状態不明（0.90） → 写真で傷・汚れが見つかればその係数。見つからなければ写真の判定を使うが、
+      確信度が「低」のときは状態不明の 0.90 より上げない
+    ラベルは写真の判定を使ったとき「（写真）」を付ける"""
+    rank = (photo or {}).get("rank")
+    if rank not in PHOTO_RANKS:
+        return text
+    factor, order = PHOTO_RANKS[rank]
+    label = f"{rank}（写真）"
+    if text is not _DEFAULT:
+        # 写真で傷・汚れが見つからなかった（新品同様・目立った傷なし）ときはタイトルの状態のまま
+        # （タグ付き新品の写真は「目立った傷なし」と答えることが多く、下げる理由にならない）
+        if factor >= _DEFAULT_PHOTO_CLEAN or factor >= text.factor:
+            return text
+        return ConditionResult(label, factor, order)
+    if (photo or {}).get("confidence") == "低" and factor > _DEFAULT.factor:
+        return ConditionResult(f"{rank}（写真・確信度低）", _DEFAULT.factor, _DEFAULT.rank)
+    return ConditionResult(label, factor, order)
+
+
+def is_unknown(result: ConditionResult) -> bool:
+    """タイトルから状態が分からなかったか"""
+    return result is _DEFAULT

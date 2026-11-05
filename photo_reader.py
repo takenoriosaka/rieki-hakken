@@ -1,8 +1,13 @@
 """
-写真から型番（品番）を読むモジュール
+写真から型番（品番）を読み、傷・汚れ（状態）を確認するモジュール
 
-型番照合（require_model_number）で、タイトルにも商品説明文にも型番が無かった出品の写真を
-Claude API に見せ、品質表示タグ・内側のタグ・刻印などに印字された品番を読み取る（main.py から呼ぶ）。
+(1) 型番照合（require_model_number）で、タイトルにも商品説明文にも型番が無かった出品の写真を
+    Claude API に見せ、品質表示タグ・内側のタグ・刻印などに印字された品番を読み取る（read_listings）。
+(2) 利益が出る案件の写真を見せ、傷・汚れを5段階（新品同様 / 目立った傷なし / やや傷あり / 傷あり / 状態悪い）で
+    判定する（inspect_deals）。結果はタイトルの状態と組み合わせ、悪いほうで利益を計算し直す
+    （condition_checker.combine / analyzer.apply_photo_condition）。
+  どちらも同じ1回の API 呼び出しで「品番」と「状態」の両方を答えさせる（料金を抑えるため。(1) で読んだ出品が
+  案件になったときは、(2) で同じ写真を読み直さない）。
 
 ・使えるのは次の両方を満たすときだけ（それ以外は静かに無効。既存の動作は一切変わらない）:
     (a) .env に ANTHROPIC_API_KEY がある（set_api_key.command で登録する）
@@ -10,13 +15,18 @@ Claude API に見せ、品質表示タグ・内側のタグ・刻印などに印
   anthropic / Pillow の import は有効なときだけ行う。
 ・Claude が返した文字列は必ず model_extractor.extract() に通し、正規の型番形式に当てはまったものだけ
   採用する（読み間違い・推測の混入を防ぐ）。採用後は既存どおりメルカリ相場の取得へ進む。
-・結果（読めなかった場合も含む）は出品URL単位で DB にキャッシュし、再スキャンでは API を呼ばない。
+・結果（読めなかった場合も含む）は DB にキャッシュし、再スキャンでは API を呼ばない。品番は出品URL単位
+  （photo_read_cache）、状態は出品URL＋写真URLの一覧の単位（photo_inspect_cache。写真が差し替えられたら読み直す）。
   API エラーのときは保存せず、次回再試行する。
-・1回のスキャンの料金上限（settings.photo_read_max_yen_per_scan）を超えたら、写真読み取りだけ止める。
+・1回のスキャンの料金上限（settings.photo_read_max_yen_per_scan）は品番・状態の両方で共有し、超えたら
+  写真の確認だけ止める（スキャンは続ける）。
+・ローカル画面の「写真をAIで確認する」のチェックを外すと、そのスキャンでは (1)(2) とも行わない
+  （settings.photo_check_enabled）。
 ・API キーはログに出さない（エラー表示でも念のため伏せる）。
 """
 
 import base64
+import hashlib
 import io
 import json
 import math
@@ -45,6 +55,8 @@ DEFAULTS = {
     "photo_read_max_images": 20,               # 1出品あたりに見せる写真の上限（タグは後ろの方に多いので末尾を優先）
     "photo_read_max_edge": 1568,               # 送る前に縮小する長辺（px）。タグの小さい文字が読める大きさ
     "photo_read_usd_jpy": 155,                 # 料金の円換算レート（概算表示・上限判定用）
+    "photo_check_enabled": True,               # このスキャンで写真の確認（品番・状態）をするか（ローカル画面のチェック）
+    "photo_condition_check": True,             # 案件の写真で傷・汚れを確認するか
 }
 
 # モデルごとの料金（USD / 100万トークン: 入力, 出力）。claude-api スキルの料金表（2026-10-06 時点）で確認。
@@ -76,12 +88,16 @@ _USER_AGENT = (
 )
 
 _SYSTEM = (
-    "あなたは中古品の出品写真から、タグや刻印に印字された品番を一字一句正確に書き写す担当です。"
-    "写真で読めない文字は推測しません。"
+    "あなたは中古品の出品写真を確認する担当です。タグや刻印に印字された品番を一字一句正確に書き写し、"
+    "写真に写っている傷・汚れを見落とさずに記録します。写真で読めない文字・見えない箇所は推測しません。"
 )
 
-_PROMPT = """上の{n}枚は、フリマ・オークションに出品された「{brand}」（{aliases}）の{category}商品写真です。
+_PROMPT_HEAD = """上の{n}枚は、フリマ・オークションに出品された「{brand}」（{aliases}）の{category}商品写真です。
+出品タイトル: {title}
+"""
 
+_PROMPT_NUMBER = """
+【1. 品番】
 写真に写っている品質表示タグ・洗濯表示タグ・内側のブランドタグ・紙タグ・刻印・ギャランティカード・箱やラベルなどに印字された、この商品の品番（型番・スタイル番号・モデル番号）を探して、その文字をそのまま書き写してください。
 
 このブランドの品番は、例えば次のような形式です（形式の参考で、この商品の品番ではありません）:
@@ -93,7 +109,51 @@ _PROMPT = """上の{n}枚は、フリマ・オークションに出品された�
 - 品番が写っていない・読めないときは model_numbers を空の配列にする。
 - サイズ、カラー番号、素材表記、RN番号・CA番号、製造番号・シリアル番号、JANコード、価格は品番ではないので書かない。
 - 同じ品番が複数の写真に写っていても1回だけ書く。text には品番だけを、写真の表記どおり（ハイフンや空白も含めて）書く。
-- photo には、その品番が写っている写真の番号を書く。"""
+- photo には、その品番が写っている写真の番号を書く。
+"""
+
+_PROMPT_NO_NUMBER = """
+【1. 品番】
+このブランドは品番を読む対象ではありません。model_numbers は空の配列にしてください。
+"""
+
+_PROMPT_CONDITION = """
+【2. 状態（傷・汚れ）】
+写真を1枚ずつよく見て、この商品の傷・汚れ・劣化を探し、中古品としての状態を判定してください。
+特に次の箇所を確認してください: {checkpoints}
+
+rank は次の5段階から1つ選ぶ（買い取って売り直す人の目で、厳しめに判定する）:
+- 新品同様: 使用感が見られない（タグ付き・未使用に見える）
+- 目立った傷なし: よく見ると小さな使用感はあるが、傷・汚れは目立たない
+- やや傷あり: 小さな傷・汚れ・擦れが1〜2か所見える（着用・使用に支障なし）
+- 傷あり: はっきり分かる傷・汚れ・擦れ・ほつれ等がある。または小さなものでも3か所以上ある
+- 状態悪い: 破れ・穴・大きなシミ・ひどい劣化・部品やファーの欠損、全体に多数のシミ・汚れがあるなど、売るときに大きく値下がりする状態
+
+severity の目安: 小 = 近くで見ると分かる / 中 = 普通に見て分かる / 大 = 遠目でも分かる・修理やクリーニングが必要
+
+ルール:
+- 写真で実際に見えたものだけを書く。タイトルや「中古だから」という推測では書かない。
+- issues には見つけた傷・汚れを1件ずつ書く。location は箇所（例: 襟、右袖口、前立て、裾、フード、ファー、ロゴワッペン、ファスナー、持ち手、角、金具、風防、レンズ）、issue は内容（例: 黒ずみ、擦れ、羽毛抜け、ひび割れ、シミ、ほつれ、穴、毛玉、色あせ、メッキ剥がれ、傷）、severity は 小 / 中 / 大、photo はその写真の番号。
+- 傷・汚れが見つからなければ issues は空の配列にする。
+- 写真が3枚以下・全体の写真だけで寄りの写真が無い・遠い・暗い・ぼやけている・公式画像やカタログ画像だけ、などで状態を十分に確認できないときは confidence を「低」にする。主な箇所を寄りの写真でよく確認できたら「高」、その間は「中」。
+- location・issue・unchecked はすべて日本語で書く。
+- unchecked には、写真に写っていない・小さくて確認できなかった重要な箇所を短く書く（例: 「裏地・ポケット内側が写っていない」）。すべて確認できたら空文字にする。
+"""
+
+# ジャンルごとの確認箇所（_PROMPT_CONDITION の checkpoints）
+_CHECKPOINTS = {
+    "ダウン": "襟・フード・袖口・前立て・裾の黒ずみや皮脂汚れ、表地の擦れ・破れ・穴・ほつれ・テカり、羽毛抜け・羽毛の偏り、"
+              "ファーの抜け・毛割れ、ロゴワッペンの剥がれ・色あせ、ファスナー・ボタン・スナップの欠損や傷、裏地の汚れ、毛玉、色あせ",
+    "バッグ": "角の擦れ、持ち手・ショルダーの黒ずみやひび割れ、ヌメ革のシミ・焼け、内側の汚れ・ベタつき・ポケットの破れ、"
+              "金具の傷・メッキ剥がれ、型崩れ、ファスナーの不具合",
+    "時計":   "風防の傷・欠け、ケース・ベゼルの傷・打痕、ブレスレットやベルトの傷・伸び・劣化・切れ、文字盤のシミ・変色、リューズ",
+    "サングラス": "レンズの傷・コーティング剥がれ、フレームの傷・塗装剥がれ、テンプルの曲がり・ゆるみ、鼻パッドの汚れ・劣化",
+    "アクセサリー": "表面の傷、変色・くすみ、歪み・へこみ、石の欠け・欠損、留め具の不具合",
+    "スカーフ": "シミ・汚れ、ほつれ・穴・糸引き、色あせ、強いシワ・折り跡、縁の巻きの傷み",
+}
+_CHECKPOINTS_DEFAULT = "全体の傷・汚れ・擦れ・破れ・色あせ・部品の欠損"
+
+PHOTO_RANKS = ["新品同様", "目立った傷なし", "やや傷あり", "傷あり", "状態悪い"]
 
 # 構造化出力（JSON）の形
 _SCHEMA = {
@@ -111,21 +171,51 @@ _SCHEMA = {
                 "additionalProperties": False,
             },
         },
+        "condition": {
+            "type": "object",
+            "properties": {
+                "rank": {"type": "string", "enum": PHOTO_RANKS},
+                "issues": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "location": {"type": "string"},
+                            "issue": {"type": "string"},
+                            "severity": {"type": "string", "enum": ["小", "中", "大"]},
+                            "photo": {"type": "integer"},
+                        },
+                        "required": ["location", "issue", "severity", "photo"],
+                        "additionalProperties": False,
+                    },
+                },
+                "confidence": {"type": "string", "enum": ["高", "中", "低"]},
+                "unchecked": {"type": "string"},
+            },
+            "required": ["rank", "issues", "confidence", "unchecked"],
+            "additionalProperties": False,
+        },
     },
-    "required": ["model_numbers"],
+    "required": ["model_numbers", "condition"],
     "additionalProperties": False,
 }
 
 # スキャン統計（scan() の開始時に reset_session で初期化。ローカル画面にも表示する）
 stats = {
-    "targets": 0,      # 写真読み取りの対象になった出品（キャッシュ利用を含む）
-    "cached": 0,       # キャッシュの結果を使った件数（API は呼ばない）
-    "read": 0,         # API で写真を読んだ件数
+    "targets": 0,      # 写真から品番を読む対象になった出品（キャッシュ利用を含む）
+    "cached": 0,       # 品番: キャッシュの結果を使った件数（API は呼ばない）
+    "read": 0,         # API で写真を読んだ件数（品番・状態の両方を含む）
     "adopted": 0,      # 正規の型番形式に当てはまり採用した件数（キャッシュ利用を含む）
+    "inspect_targets": 0,  # 状態: 写真で傷・汚れを確認する対象になった案件
+    "inspected": 0,        # 状態: 判定できた案件（キャッシュ利用を含む）
+    "inspect_cached": 0,   # 状態: キャッシュの結果を使った件数
+    "downgraded": 0,       # 状態: 写真の判定で状態を下げた案件
+    "dropped": 0,          # 状態: 写真の判定で利益が条件を下回り外した案件
     "api_calls": 0,    # API 呼び出し回数
     "errors": 0,       # API エラー・写真取得エラー（保存せず次回再試行）
     "cost_yen": 0.0,   # 概算料金（円）
-    "stopped": False,  # 料金上限で写真読み取りを止めたか
+    "seconds": 0.0,    # 写真の取得・API にかかった時間（秒）
+    "stopped": False,  # 料金上限で写真の確認を止めたか
 }
 _session = {"settings": dict(DEFAULTS), "disabled": "", "client": None}
 
@@ -146,7 +236,7 @@ def _api_key() -> str:
 
 
 def status() -> tuple[bool, str]:
-    """(有効か, 画面に出す理由)。キーの中身は返さない"""
+    """(使えるか, 画面に出す理由)。キーの中身は返さない（このスキャンでオフにしたかどうかは含まない）"""
     if os.path.exists(FRIEND_MODE_PATH):
         return False, "このMacでは使いません"
     key = _api_key()
@@ -158,24 +248,35 @@ def status() -> tuple[bool, str]:
 
 
 def enabled() -> bool:
-    """写真から型番を読む機能が使えるか（スキャン中に API キーが無効と分かった場合も False）"""
-    return status()[0] and not _session["disabled"]
+    """このスキャンで写真の確認（品番・状態）をするか（使える状態で、画面でオフにされておらず、
+    スキャン中に API キーが無効と分かっていない）"""
+    return status()[0] and not _session["disabled"] and bool(_settings("photo_check_enabled"))
+
+
+def condition_enabled() -> bool:
+    """このスキャンで案件の写真の傷・汚れを確認するか"""
+    return enabled() and bool(_settings("photo_condition_check"))
 
 
 def status_info() -> dict:
-    """ローカル画面に出す状態（有効/無効の表示とスキャン統計）"""
+    """ローカル画面に出す状態（有効/無効の表示とスキャン統計）。
+    available = この Mac で使えるか（画面の「写真をAIで確認する」のチェックを出すか）"""
     ok, reason = status()
+    available = ok
     if ok and _session["disabled"]:
         ok, reason = False, _session["disabled"]
-    label = "写真から型番読み取り: " + ("有効" if ok else f"無効（{reason}）")
-    return {"enabled": ok, "label": label, "stats": dict(stats), "summary": summary() if ok else ""}
+    label = "写真AI確認（型番タグ・傷汚れ）: " + ("使えます" if ok else f"無効（{reason}）")
+    return {"enabled": ok, "available": available, "label": label, "stats": dict(stats),
+            "summary": summary() if ok else ""}
 
 
 def reset_session(settings: dict) -> None:
     """スキャン開始時に呼ぶ（統計・料金のカウントを0に戻し、設定を読み直す）"""
     for k in stats:
-        stats[k] = False if k == "stopped" else 0
+        stats[k] = 0
+    stats["stopped"] = False
     stats["cost_yen"] = 0.0
+    stats["seconds"] = 0.0
     _session["settings"] = {k: settings.get(k, v) for k, v in DEFAULTS.items()}
     _session["disabled"] = ""
     _session["client"] = None
@@ -186,16 +287,19 @@ def summary() -> str:
     s = stats
     stop = " / 料金上限で停止" if s["stopped"] else ""
     err = f" / エラー {s['errors']}件" if s["errors"] else ""
-    return (f"写真読み取り 対象 {s['targets']}件（キャッシュ {s['cached']}件・API {s['read']}件）/ "
-            f"採用 {s['adopted']}件 / API呼び出し {s['api_calls']}回 / 概算 ¥{s['cost_yen']:,.0f}{err}{stop}")
+    return (f"写真AI確認 品番: 対象 {s['targets']}件（キャッシュ {s['cached']}件）・採用 {s['adopted']}件 / "
+            f"状態: 対象 {s['inspect_targets']}件・判定 {s['inspected']}件（キャッシュ {s['inspect_cached']}件）・"
+            f"状態を下げて残した {s['downgraded']}件・利益不足で除外 {s['dropped']}件 / "
+            f"API {s['api_calls']}回 / 概算 ¥{s['cost_yen']:,.0f} / {s['seconds'] / 60:.1f}分{err}{stop}")
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 読み取り（main.py から呼ぶ）
+# (1) 品番の読み取り（main.py から呼ぶ）
 # ──────────────────────────────────────────────────────────────────────────────
 
 def read_listings(items: list, brand: str, category: str, get_images) -> dict[str, str]:
     """型番が取れなかった出品の写真から品番を読み、{item.url: 型番} を返す（採用できたものだけ）。
+    同じ呼び出しで状態も判定し、photo_inspect_cache に保存する（案件になったら inspect_deals で使う）。
     get_images: 出品のリストを受け取り {url: 写真URLの一覧 or None} を返す関数（main.py。キャッシュに
                 無い出品だけについて呼ぶ）。
     """
@@ -225,25 +329,32 @@ def read_listings(items: list, brand: str, category: str, get_images) -> dict[st
         print(f"    写真読み取り: 料金上限に達しているため {len(todo)}件は読みません")
         return results
 
-    image_urls = get_images(todo)
-    for it in todo:
-        if stats["stopped"] or _session["disabled"]:
-            break
-        urls = image_urls.get(it.url)
-        if not urls:
-            stats["errors"] += 1
-            continue  # 写真URLが取れなかった（ページ構造の変化・取得エラー）→ 保存せず次回再試行
-        texts = _read_photos(it, urls, brand, category)
-        if texts is None:
-            continue  # API エラー等 → 保存せず次回再試行
-        model = _adopt(texts, brand, category)
-        database.cache_photo_read(it.url, texts, model, PHOTO_CACHE_HOURS)
-        if model:
-            results[it.url] = model
-            stats["adopted"] += 1
-            print(f"      写真から型番 {model} を採用: {it.title[:40]}")
-        elif texts:
-            print(f"      写真の文字 {', '.join(texts)[:60]} は型番の形式でないため不採用: {it.title[:30]}")
+    started = time.time()
+    try:
+        image_urls = get_images(todo)
+        for it in todo:
+            if stats["stopped"] or _session["disabled"]:
+                break
+            urls = image_urls.get(it.url)
+            if not urls:
+                stats["errors"] += 1
+                continue  # 写真URLが取れなかった（ページ構造の変化・取得エラー）→ 保存せず次回再試行
+            got = _ask(it, urls, brand, category, ask_number=True)
+            if got is None:
+                continue  # API エラー等 → 保存せず次回再試行
+            texts = got["texts"]
+            model = _adopt(texts, brand, category)
+            database.cache_photo_read(it.url, texts, model, PHOTO_CACHE_HOURS)
+            if got["condition"]:
+                database.cache_photo_inspect(it.url, _photos_key(urls), got["condition"], PHOTO_CACHE_HOURS)
+            if model:
+                results[it.url] = model
+                stats["adopted"] += 1
+                print(f"      写真から型番 {model} を採用: {it.title[:40]}")
+            elif texts:
+                print(f"      写真の文字 {', '.join(texts)[:60]} は型番の形式でないため不採用: {it.title[:30]}")
+    finally:
+        stats["seconds"] += time.time() - started
     return results
 
 
@@ -259,12 +370,101 @@ def _adopt(texts: list[str], brand: str, category: str) -> str | None:
     return None
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# (2) 案件の状態（傷・汚れ）の確認（main.py から呼ぶ）
+# ──────────────────────────────────────────────────────────────────────────────
+
+def inspect_deals(deals: list, get_images, should_stop=None) -> dict[str, dict]:
+    """案件（Deal）の写真で傷・汚れを確認し、{item.url: 状態の判定} を返す（判定できたものだけ）。
+    見込み利益の大きい案件から順に確認する（料金上限で止まっても、大事な案件は確認済みになるように）。
+    状態の判定 = {"rank", "issues": [{location, issue, severity, photo}], "confidence", "unchecked"}"""
+    if not deals or not condition_enabled():
+        return {}
+    by_url: dict[str, object] = {}
+    for d in sorted(deals, key=lambda d: d.estimated_profit, reverse=True):
+        if d.item.url and d.item.url not in by_url:
+            by_url[d.item.url] = d
+    items = [d.item for d in by_url.values()]
+    stats["inspect_targets"] += len(items)
+    print(f"\n[写真で状態確認] 案件 {len(items)}件の写真で傷・汚れを確認します（見込み利益の大きい順）")
+
+    started = time.time()
+    results: dict[str, dict] = {}
+    try:
+        # 写真URLは説明文・品番の確認で取得済みならスクレイパー側で再取得しない
+        image_urls = get_images(items)
+        keys = {it.url: _photos_key(image_urls.get(it.url) or []) for it in items}
+        cached = database.get_cached_photo_inspects(
+            [(it.url, keys[it.url]) for it in items if image_urls.get(it.url)], PHOTO_CACHE_HOURS)
+        stats["inspect_cached"] += len(cached)
+        results.update(cached)
+        if cached:
+            print(f"    キャッシュの判定 {len(cached)}件を使います")
+        for i, it in enumerate(items, 1):
+            if it.url in results:
+                continue
+            if stats["stopped"] or _session["disabled"]:
+                break
+            if should_stop and should_stop():
+                print("    [中断] 写真での状態確認を打ち切りました")
+                break
+            urls = image_urls.get(it.url)
+            if not urls:
+                stats["errors"] += 1
+                print(f"      [写真で状態確認] 写真のURLを取得できませんでした: {it.url}")
+                continue
+            got = _ask(it, urls, by_url[it.url].brand, by_url[it.url].category, ask_number=False)
+            if got is None or not got["condition"]:
+                continue
+            database.cache_photo_inspect(it.url, keys[it.url], got["condition"], PHOTO_CACHE_HOURS)
+            results[it.url] = got["condition"]
+            c = got["condition"]
+            issues = "、".join(f"{x['location']}の{x['issue']}" for x in c["issues"][:4]) or "傷・汚れなし"
+            print(f"      ({i}/{len(items)}) {c['rank']}（確信度 {c['confidence']}）{issues[:60]}: {it.title[:30]}")
+    finally:
+        stats["seconds"] += time.time() - started
+    stats["inspected"] += len(results)
+    return results
+
+
+# 状態の判定の仕方（プロンプト・ランクの基準）を変えたら上げる。キャッシュのキーに含め、古い基準の判定を使わない
+_INSPECT_VERSION = "2"
+
+
+def _photos_key(urls: list[str]) -> str:
+    """写真URLの一覧のキー（写真が差し替えられた・判定の基準を変えたら別のキーになる）"""
+    return hashlib.sha1((_INSPECT_VERSION + "\n" + "\n".join(urls)).encode("utf-8")).hexdigest()
+
+
 def _settings(key: str):
     return _session["settings"].get(key, DEFAULTS[key])
 
 
-def _read_photos(item, urls: list[str], brand: str, category: str) -> list[str] | None:
-    """1出品の写真をまとめて1リクエストで Claude に読ませ、品番の文字列の一覧を返す。
+def _clean_condition(c) -> dict | None:
+    """API の状態の判定を整える（形がおかしければ None）"""
+    if not isinstance(c, dict) or c.get("rank") not in PHOTO_RANKS:
+        return None
+    issues = []
+    for x in c.get("issues") or []:
+        if not isinstance(x, dict):
+            continue
+        loc, issue = str(x.get("location") or "").strip(), str(x.get("issue") or "").strip()
+        if not (loc or issue):
+            continue
+        sev = x.get("severity") if x.get("severity") in ("小", "中", "大") else "小"
+        try:
+            photo = int(x.get("photo") or 0)
+        except (TypeError, ValueError):
+            photo = 0
+        issues.append({"location": loc[:30], "issue": issue[:40], "severity": sev, "photo": photo})
+    conf = c.get("confidence") if c.get("confidence") in ("高", "中", "低") else "低"
+    return {"rank": c["rank"], "issues": issues[:12], "confidence": conf,
+            "unchecked": str(c.get("unchecked") or "").strip()[:120]}
+
+
+def _ask(item, urls: list[str], brand: str, category: str, ask_number: bool) -> dict | None:
+    """1出品の写真をまとめて1リクエストで Claude に見せ、品番と状態を答えさせる。
+    返り値 {"texts": 品番の文字列の一覧, "condition": 状態の判定 or None}。
     写真が1枚も取れない・API エラーなら None（保存しない）"""
     urls = _pick(urls, int(_settings("photo_read_max_images")))
     images = []
@@ -275,15 +475,16 @@ def _read_photos(item, urls: list[str], brand: str, category: str) -> list[str] 
         time.sleep(_DOWNLOAD_INTERVAL)
     if not images:
         stats["errors"] += 1
-        print(f"      [写真読み取り] 写真をダウンロードできませんでした: {item.url}")
+        print(f"      [写真AI確認] 写真をダウンロードできませんでした: {item.url}")
         return None
 
     model = str(_settings("photo_read_model"))
-    est_tokens = sum(t for _, t in images) + 1500
-    if stats["cost_yen"] + _yen(model, est_tokens, 1500) > float(_settings("photo_read_max_yen_per_scan")):
+    est_tokens = sum(t for _, t in images) + 2500
+    limit = float(_settings("photo_read_max_yen_per_scan"))
+    if stats["cost_yen"] + _yen(model, est_tokens, 2500) > limit:
         stats["stopped"] = True
-        print(f"    [写真読み取り] 1回のスキャンの料金上限 ¥{float(_settings('photo_read_max_yen_per_scan')):,.0f} に"
-              f"達するため、写真読み取りを止めます（スキャンは続けます）")
+        print(f"    [写真AI確認] 1回のスキャンの料金上限 ¥{limit:,.0f} に達するため、"
+              f"写真の確認を止めます（スキャンは続けます）")
         return None
 
     content = []
@@ -292,38 +493,57 @@ def _read_photos(item, urls: list[str], brand: str, category: str) -> list[str] 
         content.append({"type": "image",
                         "source": {"type": "base64", "media_type": "image/jpeg", "data": data}})
     aliases = " / ".join(model_extractor.brand_aliases(brand)) or brand
-    content.append({"type": "text", "text": _PROMPT.format(
-        n=len(images), brand=brand, aliases=aliases,
-        category=f"{category}の" if category else "",
-        examples="\n".join(f"  {e}" for e in model_extractor.number_examples(brand, category)),
-    )})
+    examples = model_extractor.number_examples(brand, category) if ask_number else []
+    prompt = _PROMPT_HEAD.format(n=len(images), brand=brand, aliases=aliases,
+                                 category=f"{category}の" if category else "",
+                                 title=(item.title or "")[:120])
+    if ask_number and examples:
+        prompt += _PROMPT_NUMBER.format(examples="\n".join(f"  {e}" for e in examples))
+    else:
+        prompt += _PROMPT_NO_NUMBER
+    prompt += _PROMPT_CONDITION.format(checkpoints=_CHECKPOINTS.get(category, _CHECKPOINTS_DEFAULT))
+    content.append({"type": "text", "text": prompt})
 
     resp = _call_api(model, content)
     if resp is None:
         return None
     if resp.stop_reason == "refusal":
         # 断られた場合は「読めなかった」として保存する（毎回同じ写真で料金がかからないように）
-        print(f"      [写真読み取り] 回答を断られました（読めなかった扱い）: {item.url}")
+        print(f"      [写真AI確認] 回答を断られました（読めなかった扱い）: {item.url}")
         stats["read"] += 1
-        return []
+        return {"texts": [], "condition": None}
     if resp.stop_reason == "max_tokens":
         stats["errors"] += 1
-        print(f"      [写真読み取り] 回答が途中で切れました（次回再試行）: {item.url}")
+        print(f"      [写真AI確認] 回答が途中で切れました（次回再試行）: {item.url}")
         return None
     text = next((b.text for b in resp.content if getattr(b, "type", "") == "text"), "")
-    try:
-        data = json.loads(text)
-    except ValueError:
+    data = _parse_json(text)
+    if data is None:
         stats["errors"] += 1
-        print(f"      [写真読み取り] 回答の形式が想定外です（次回再試行）: {item.url}")
+        print(f"      [写真AI確認] 回答の形式が想定外です（次回再試行）: {item.url}")
         return None
     stats["read"] += 1
     texts = []
-    for d in data.get("model_numbers") or []:
+    for d in (data.get("model_numbers") or []) if ask_number else []:
         t = str(d.get("text") or "").strip() if isinstance(d, dict) else ""
         if t and t not in texts:
             texts.append(t)
-    return texts
+    return {"texts": texts, "condition": _clean_condition(data.get("condition"))}
+
+
+def _parse_json(text: str) -> dict | None:
+    """構造化出力の JSON を読む（念のため、前後に余計な文字やコードブロックが付いていても読む）"""
+    text = (text or "").strip()
+    for cand in (text, text[text.find("{"):text.rfind("}") + 1] if "{" in text else ""):
+        if not cand:
+            continue
+        try:
+            data = json.loads(cand)
+        except ValueError:
+            continue
+        if isinstance(data, dict):
+            return data
+    return None
 
 
 def _pick(urls: list[str], limit: int) -> list[str]:
@@ -351,7 +571,7 @@ def _download(url: str, max_edge: int) -> tuple[str, int] | None:
         tokens = min(math.ceil(w / 28) * math.ceil(h / 28), 4784)
         return base64.standard_b64encode(buf.getvalue()).decode("ascii"), tokens
     except Exception as e:
-        print(f"      [写真読み取り] 写真の取得エラー ({url}): {type(e).__name__}")
+        print(f"      [写真AI確認] 写真の取得エラー ({url}): {type(e).__name__}")
         return None
 
 

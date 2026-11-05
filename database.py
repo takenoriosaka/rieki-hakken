@@ -38,6 +38,15 @@ def init_db():
                 fetched_at TEXT NOT NULL
             );
 
+            -- 写真から判定した状態（傷・汚れ）のキャッシュ（案件の写真。photo_reader）
+            -- photos_key は写真URLの一覧のハッシュ（写真が差し替えられたら読み直す）。result は判定の JSON
+            CREATE TABLE IF NOT EXISTS photo_inspect_cache (
+                url        TEXT PRIMARY KEY,
+                photos_key TEXT NOT NULL,
+                result     TEXT NOT NULL,
+                fetched_at TEXT NOT NULL
+            );
+
             -- 生徒ごとの配信済み案件（競合防止・重複防止）
             CREATE TABLE IF NOT EXISTS student_deals (
                 student_email TEXT NOT NULL,
@@ -223,6 +232,50 @@ def cache_photo_read(url: str, texts: list[str], model: str | None, max_age_hour
         # 期限切れは掃除（DB肥大化防止）
         conn.execute(
             "DELETE FROM photo_read_cache WHERE fetched_at < ?",
+            ((now - timedelta(hours=max_age_hours)).isoformat(),),
+        )
+
+
+def get_cached_photo_inspects(pairs: list[tuple[str, str]], max_age_hours: int) -> dict[str, dict]:
+    """写真から判定済みの状態を返す（pairs = [(url, photos_key)]。写真URLの一覧が同じものだけ。{url: 判定}）"""
+    if not pairs:
+        return {}
+    want = dict(pairs)
+    urls = list(want)
+    cutoff = (datetime.now() - timedelta(hours=max_age_hours)).isoformat()
+    out: dict[str, dict] = {}
+    with _conn() as conn:
+        for i in range(0, len(urls), 500):
+            chunk = urls[i:i + 500]
+            marks = ",".join("?" * len(chunk))
+            rows = conn.execute(
+                f"SELECT url, photos_key, result FROM photo_inspect_cache "
+                f"WHERE url IN ({marks}) AND fetched_at > ?",
+                (*chunk, cutoff),
+            ).fetchall()
+            for url, key, result in rows:
+                if key != want.get(url):
+                    continue  # 写真が差し替えられた → 読み直す
+                try:
+                    data = json.loads(result)
+                except ValueError:
+                    continue
+                if isinstance(data, dict) and data.get("rank"):
+                    out[url] = data
+    return out
+
+
+def cache_photo_inspect(url: str, photos_key: str, result: dict, max_age_hours: int) -> None:
+    """写真から判定した状態を保存する"""
+    now = datetime.now()
+    with _conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO photo_inspect_cache (url, photos_key, result, fetched_at) "
+            "VALUES (?, ?, ?, ?)",
+            (url, photos_key, json.dumps(result, ensure_ascii=False), now.isoformat()),
+        )
+        conn.execute(
+            "DELETE FROM photo_inspect_cache WHERE fetched_at < ?",
             ((now - timedelta(hours=max_age_hours)).isoformat(),),
         )
 

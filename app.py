@@ -234,7 +234,10 @@ def build_options() -> dict:
             "min_roi": 0,
             "per_source": 20,
             "config_per_source": settings.get("search_items_per_source", 80),
+            # 写真AI確認（型番タグ・傷汚れ）のチェックの既定（この Mac で使えるときだけオン）
+            "photo_check": photo_reader.status()[0],
         },
+        "photo_check_available": photo_reader.status()[0],
     }
 
 
@@ -409,6 +412,9 @@ def _deal_to_dict(d) -> dict:
         "estimated_profit": d.estimated_profit,
         "roi_percent": d.roi_percent,
         "condition_label": d.condition_label,
+        "text_condition_label": d.text_condition_label,
+        # 写真から AI が判定した状態（rank / issues / confidence / unchecked）。未確認なら None
+        "photo_condition": d.photo_condition,
         "end_time": d.item.end_time,
         "is_auction": d.item.is_auction,
     }
@@ -510,6 +516,8 @@ def _run_job(req: dict):
         hours = float(hours) if hours not in (None, "", "0", 0) else None
         auction_only = bool(req.get("auction_only"))
         sources = set(req.get("sources") or [])
+        # 写真AI確認（型番タグ・傷汚れ）: 画面のチェック。古い画面から送られて項目が無いときはオン
+        settings["photo_check_enabled"] = req.get("photo_check", True) is not False
 
         plan = build_plan(req, cfg)
         with JOB.lock:

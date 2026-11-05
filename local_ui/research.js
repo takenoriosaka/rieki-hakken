@@ -21,7 +21,7 @@ const state = {
   model_numbers: new Set(),  // "ブランド|型番"
   sources: new Set(),
 };
-const cond = { min_profit: 3000, min_roi: 0, auction_hours: '', auction_only: false, per_source: 20, free_numbers: '' };
+const cond = { min_profit: 3000, min_roi: 0, auction_hours: '', auction_only: false, per_source: 20, free_numbers: '', photo_check: true };
 
 let currentStep = 1;
 let RESULTS = [];
@@ -296,6 +296,9 @@ function renderStep4() {
   $('hoursSeg').innerHTML = HOUR_OPTIONS.map(([v, l]) =>
     `<button type="button" class="${String(cond.auction_hours) === v ? 'on' : ''}" data-hours="${v}">${l}${v ? '以内' : ''}</button>`).join('');
   $('auctionOnly').checked = !!cond.auction_only;
+  // 写真AI確認のチェック（この Mac で API キーが使えるときだけ表示）
+  $('photoCheckCard').hidden = !OPTIONS.photo_check_available;
+  $('photoCheck').checked = !!cond.photo_check;
   $('perSourceSeg').innerHTML = PER_SOURCE_PRESETS.map(([v, l]) =>
     `<button type="button" class="${Number(cond.per_source) === v ? 'on' : ''}" data-per="${v}"><b>${l}</b><span>${v}件</span></button>`).join('');
   $('sourceGrid').innerHTML = OPTIONS.sources.map(s => {
@@ -367,6 +370,7 @@ function renderFinal() {
     ['残り時間', (hours && hours[0] ? hours[1] + '以内' : '指定なし') + (cond.auction_only ? '・オークションのみ' : '')],
     ['取得件数', `${preset ? preset[1] : ''} ${cond.per_source}件`],
   ];
+  if (OPTIONS.photo_check_available) rows.push(['写真AI確認', cond.photo_check ? 'する（型番タグ・傷汚れ）' : 'しない']);
   $('finalSummary').innerHTML = rows.map(([k, v]) =>
     `<div class="fs-row"><dt>${k}</dt><dd class="${v ? '' : 'missing'}">${esc(v || '未選択')}</dd></div>`).join('');
   const e = estimateMinutes(Number(cond.per_source));
@@ -432,6 +436,7 @@ document.addEventListener('input', e => {
 });
 document.addEventListener('change', e => {
   if (e.target.id === 'auctionOnly') { cond.auction_only = e.target.checked; saveState(); renderFinal(); }
+  if (e.target.id === 'photoCheck') { cond.photo_check = e.target.checked; saveState(); renderFinal(); }
   if (e.target.id === 'minProfit' || e.target.id === 'minRoi') { syncNumber(e.target.id, e.target.id === 'minProfit' ? cond.min_profit : cond.min_roi); e.target.value = e.target.id === 'minProfit' ? cond.min_profit : cond.min_roi; }
 });
 
@@ -462,6 +467,7 @@ function collectConditions() {
     auction_only: !!cond.auction_only,
     per_source: String(cond.per_source),
     sources: [...state.sources],
+    photo_check: !!(OPTIONS.photo_check_available && cond.photo_check),
   };
 }
 
@@ -520,6 +526,8 @@ function restoreState() {
   cond.auction_hours = snapHours(saved?.auction_hours);
   cond.auction_only = !!saved?.auction_only;
   cond.per_source = snapPerSource(saved?.per_source ?? d.per_source);
+  // 写真AI確認: 前回オフにしていればオフのまま。保存が無い（初回・この項目の追加前）なら既定（キーがあればオン）
+  cond.photo_check = typeof saved?.photo_check === 'boolean' && OPTIONS.photo_check_available ? saved.photo_check : !!d.photo_check;
 }
 
 // ── リサーチ実行 ──────────────────────────────────────────
@@ -818,8 +826,9 @@ function renderResults() {
           ${d.category ? `<span class="badge b-genre">${GENRE_ICONS[d.category] || ''} ${esc(d.category)}</span>` : ''}
           ${d.model ? `<span class="badge b-model">${esc(d.model)}</span>` : ''}
           ${remainBadge}
-          ${d.condition_label && d.condition_label !== '状態不明' ? `<span class="badge b-cond">${esc(d.condition_label)}</span>` : ''}
+          ${d.condition_label && d.condition_label !== '状態不明' && !d.photo_condition ? `<span class="badge b-cond">${esc(d.condition_label)}</span>` : ''}
         </div>
+        ${photoConditionHtml(d)}
         <div class="card-brand">${esc(d.brand || '')}</div>
         <div class="card-title" title="${esc(d.title)}">${esc(d.title)}</div>
         <div class="card-actions">
@@ -832,6 +841,26 @@ function renderResults() {
   }).join('');
 }
 
+// 写真から AI が判定した状態（ランクのバッジ＋見つかった傷・汚れ＋確認できなかった箇所）
+const PHOTO_RANK_CLASS = { '新品同様': 'pr-1', '目立った傷なし': 'pr-2', 'やや傷あり': 'pr-3', '傷あり': 'pr-4', '状態悪い': 'pr-5' };
+function photoConditionHtml(d) {
+  const p = d.photo_condition;
+  if (!p || !p.rank) return '';
+  const issues = Array.isArray(p.issues) ? p.issues : [];
+  const list = issues.length
+    ? `<ul class="pc-issues">${issues.map(x => `<li><span class="sev sev-${esc(x.severity)}">${esc(x.severity)}</span>${esc(x.location)}${x.location && x.issue ? 'の' : ''}${esc(x.issue)}</li>`).join('')}</ul>`
+    : '<div class="pc-none">写真で傷・汚れは見つかりませんでした</div>';
+  const used = d.condition_label && d.condition_label.includes('写真')
+    ? `相場の計算に写真の判定を使用（${esc(d.condition_label)}）`
+    : `相場の計算はタイトルの状態（${esc(d.text_condition_label || d.condition_label || '状態不明')}）を使用`;
+  return `<div class="photo-cond">
+    <div class="pc-head"><span class="badge pc-rank ${PHOTO_RANK_CLASS[p.rank] || ''}">📷 ${esc(p.rank)}</span><span class="pc-conf">確信度 ${esc(p.confidence || '—')}</span></div>
+    ${list}
+    ${p.unchecked ? `<div class="pc-unchecked">写真で確認できなかった箇所: ${esc(p.unchecked)}</div>` : ''}
+    <div class="pc-note">※ 出品写真からのAI判定です（見落とし・誤判定があり得ます）。${used}</div>
+  </div>`;
+}
+
 // ── 初期化 ───────────────────────────────────────────────
 // 写真から型番を読む機能の有効/無効（ヘッダーに小さく）と、スキャン中・後の読み取り件数・概算料金（調査中の画面）
 function renderPhotoRead(p) {
@@ -839,10 +868,10 @@ function renderPhotoRead(p) {
   $('photoStatus').hidden = false;
   $('photoStatus').textContent = p.label;
   const st = p.stats || {};
-  const show = p.enabled && (st.targets || st.api_calls);
+  const show = p.enabled && (st.targets || st.inspect_targets || st.api_calls);
   $('photoStats').hidden = !show;
   if (show) {
-    $('photoStats').textContent = `📷 写真から型番読み取り：読み取り ${num(st.read)}件（キャッシュ ${num(st.cached)}件）・採用 ${num(st.adopted)}件・API ${num(st.api_calls)}回・概算 ${num(Math.round(st.cost_yen || 0))}円`
+    $('photoStats').textContent = `📷 写真AI確認：型番 採用 ${num(st.adopted)}件 / 対象 ${num(st.targets)}件・傷汚れ 判定 ${num(st.inspected)}件（状態を下げて残した ${num(st.downgraded)}件・利益不足で除外 ${num(st.dropped)}件）・API ${num(st.api_calls)}回・概算 ${num(Math.round(st.cost_yen || 0))}円`
       + (st.stopped ? '（料金上限で停止）' : '');
   }
 }

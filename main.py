@@ -21,6 +21,7 @@ import time
 from datetime import datetime
 
 import analyzer
+import condition_checker
 import database
 import model_extractor
 import photo_reader
@@ -175,6 +176,8 @@ def scan(
     for k in _stats:
         _stats[k] = 0
     photo_reader.reset_session(settings)
+    # 案件の写真で傷・汚れを確認するスキャンか（本人の Mac でキーがあり、画面でオフにしていないときだけ）
+    analyzer.set_photo_check(photo_reader.condition_enabled())
     # 前回スキャンで控えた商品写真のURLを捨てる（ローカル画面を起動したまま何度スキャンしても溜まらないように）
     for mod in (yahoo_auctions, mercari_scraper, vector_park, trefac_fashion, rakuma, yahoo_flea_market):
         mod._image_urls.clear()
@@ -187,11 +190,13 @@ def scan(
         browser = playwright.chromium.launch(headless=True)
         try:
             page = mercari_scraper.new_page(browser)
-            return _scan_keywords(
+            deals = _scan_keywords(
                 keywords, settings, page,
                 sources=sources, item_filter=item_filter,
                 progress=progress, should_stop=should_stop,
             )
+            return _check_photo_conditions(deals, settings, page, len(keywords),
+                                           progress=progress, should_stop=should_stop)
         finally:
             browser.close()
     finally:
@@ -663,6 +668,49 @@ def _scan_keywords(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+
+def _check_photo_conditions(deals: list[Deal], settings: dict, page, total: int,
+                            progress=None, should_stop=None) -> list[Deal]:
+    """案件の写真で傷・汚れを確認し（photo_reader.inspect_deals）、タイトルの状態と保守的に組み合わせて
+    （悪いほう。condition_checker.combine）利益を計算し直す。条件の利益を下回った案件は外す。
+    写真を確認できなかった案件（料金上限・エラー・中断）はタイトルの状態だけで計算し直す
+    （写真を確認する予定のスキャンでは、タイトルで状態不明の出品を仮に「目立った傷なし」で残しているため）。
+    写真の確認をしないスキャンでは何もしない"""
+    if not analyzer._flags["photo_check"]:
+        return deals
+    photos: dict[str, dict] = {}
+    if deals and not (should_stop and should_stop()):
+        if progress:
+            progress(max(total - 1, 0), total, f"写真で傷・汚れを確認中（案件 {len(deals)}件）")
+        photos = photo_reader.inspect_deals(
+            deals, lambda todo: _get_image_urls(todo, page), should_stop=should_stop)
+    out: list[Deal] = []
+    dropped_unchecked = 0
+    for d in deals:
+        photo = photos.get(d.item.url)
+        new = analyzer.apply_photo_condition(
+            d, photo,
+            commission_rate=settings["mercari_commission_rate"],
+            shipping_cost=settings["assumed_shipping_cost"],
+            min_profit=settings["min_profit_yen"],
+        )
+        text_factor = condition_checker.check(d.item.title).factor
+        if new is None:
+            if photo:
+                photo_reader.stats["dropped"] += 1
+                print(f"  [写真で状態確認] {photo['rank']} のため利益が条件を下回り除外: {d.item.title[:40]}")
+            else:
+                dropped_unchecked += 1
+            continue
+        if photo and new.condition_factor < text_factor:
+            photo_reader.stats["downgraded"] += 1
+        out.append(new)
+    if dropped_unchecked:
+        print(f"  [写真で状態確認] 写真を確認できず、タイトルの状態（状態不明）では利益が条件を下回る {dropped_unchecked}件を除外")
+    print(f"[写真で状態確認] 案件 {len(deals)}件 → {len(out)}件（状態を下げて残した {photo_reader.stats['downgraded']}件・"
+          f"利益不足で除外 {photo_reader.stats['dropped']}件）")
+    return out
+
 
 def _get_image_urls(items: list, page) -> dict[str, list[str] | None]:
     """出品の商品写真のURL一覧を取得する（{item.url: 写真URLの一覧。取得エラーは None か含まない}）。

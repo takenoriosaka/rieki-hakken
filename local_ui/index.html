@@ -118,6 +118,11 @@
           <label class="switch-line"><input type="checkbox" id="auctionOnly"> <span>オークション形式の商品だけにする</span></label>
           <div class="hint">即決・定額・フリマ形式の商品は残り時間の条件の対象外です（上のチェックを入れると除外）</div>
         </div>
+        <div class="cond-card" id="photoCheckCard" hidden>
+          <h3>写真AI確認 <small>型番タグ・傷汚れ（有料のAPI）</small></h3>
+          <label class="switch-line"><input type="checkbox" id="photoCheck"> <span>出品写真をAIで確認する</span></label>
+          <div class="hint">説明文にも型番が無い出品はタグの写真から型番を読み、利益が出る商品は写真で傷・汚れを確認して、タイトルの状態より悪ければ相場を下げて計算します（1回のリサーチの料金上限 1,000円・確認済みの写真は再度読みません）</div>
+        </div>
         <div class="cond-card">
           <h3>取得件数 <small>仕入れ先ごと・1キーワードあたり</small></h3>
           <div class="seg seg-presets" id="perSourceSeg"></div>

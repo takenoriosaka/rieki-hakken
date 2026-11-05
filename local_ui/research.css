@@ -397,3 +397,19 @@ a.tile-best:hover { box-shadow: var(--shadow-hover); }
   .result-head h2 { font-size: 22px; }
   .fs-row dt { width: 84px; }
 }
+
+/* ── 写真AI判定の状態（カード内） ───────────────────── */
+.photo-cond { margin-top: 10px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); font-size: 12.5px; line-height: 1.5; }
+.pc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.pc-conf { color: var(--muted); font-size: 12px; }
+.pc-rank.pr-1, .pc-rank.pr-2 { background: var(--p-mid-bg); color: var(--p-mid-text); }
+.pc-rank.pr-3 { background: var(--amber-bg); color: var(--amber-text); }
+.pc-rank.pr-4, .pc-rank.pr-5 { background: var(--urgent-bg); color: var(--urgent-text); }
+.pc-issues { list-style: none; display: flex; flex-direction: column; gap: 2px; }
+.pc-issues li { display: flex; align-items: baseline; gap: 6px; overflow-wrap: anywhere; }
+.sev { flex: none; font-size: 11px; font-weight: 700; border-radius: 4px; padding: 0 5px; background: var(--badge-bg); color: var(--badge-text); }
+.sev-中 { background: var(--amber-bg); color: var(--amber-text); }
+.sev-大 { background: var(--urgent-bg); color: var(--urgent-text); }
+.pc-none { color: var(--muted); }
+.pc-unchecked { color: var(--muted); margin-top: 4px; }
+.pc-note { color: var(--faint); font-size: 11.5px; margin-top: 4px; }
