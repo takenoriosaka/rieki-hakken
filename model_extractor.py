@@ -87,7 +87,10 @@ _PATTERNS: dict[str, list[str]] = {
         # （「シャトーパーカ2053MB」。\b は日本語を語の一部とみなす）を取りこぼしていた（メルカリ売り切れ 2026-10 確認）。
         # 誤認しないもの: 価格・年（¥2580・2,580・2024AW・2025FW）、サイズ（「9061 M」= 空白の後の M/L）、
         # キッズ（6948K）、帽子等の A だけの記号（1885A）。空白・ハイフン区切りは J 付き（3438 JM）のときだけ許す
+        # 末尾 W はレディースの新しい表記（3595W=メイフィールド。写真のタグ・説明文で確認 2026-11）。
+        # 「2025W」のような年 + W は品番としない
         r'(?<![A-Za-z0-9.,¥￥])[1-9]\d{3}(?:[\s\-]?J[ML]|[ML]J?)B?J?[AI]?R?(?![A-Za-z0-9])',
+        r'(?<![A-Za-z0-9.,¥￥])(?!(?:19|20)\d{2}W)[1-9]\d{3}W(?![A-Za-z0-9])',
     ],
     "ピレネックス": [
         # HMS011, HWY012 (公式サイトで確認済み)。メルカリの表記ゆれ: hms011 / HMS 011 / HMS-011 /
@@ -102,9 +105,15 @@ _PATTERNS: dict[str, list[str]] = {
         # メルカリの表記ゆれ: lta13a4301 / LTA-13A-4301 / LTA14A 4571 / 末尾の -D・-M・-L（種別コード）
         # → _normalize_tatras で LTA13A4301 の形に整える（メルカリ売却済み 2026-10 確認）
         # 直前の数字は許す（「2020LTA20A4794-D」のように年と続けて書く出品があるため）
-        r'(?<![A-Za-z])[LM]T(?:AT|KE|LA|SE|A|K)[\s\-]?(?:\d{2}[AS]|\d[A-Z]{2})[\s\-]?\d{3,5}(?!\d)',
+        # 2020年頃からの別注・ライン違いは 系統2文字の部分に店コード等が入る（MTNU20A4199-D=ナノユニバース別注、
+        # MTOU22A4893-D、LTNO20A4652-D。トレファクの説明文の型番欄・写真のタグで確認 2026-11）。
+        # 任意の2文字は 年2桁 + A/S の形のときだけ許す（誤認を避けるため）
+        r'(?<![A-Za-z])[LM]T(?:(?:AT|KE|LA|SE|A|K)[\s\-]?(?:\d{2}[AS]|\d[A-Z]{2})|[A-Z]{2}[\s\-]?\d{2}[AS])[\s\-]?\d{3,5}(?!\d)',
         # 2012年頃までの旧品番: MTA-460-12 / LTA-4173-12（品番 + 年2桁。ハイフン区切りのまま型番とする）
         r'(?<![A-Za-z])[LM]TA[\s\-]\d{3,4}[\s\-]\d{2}(?!\d)',
+        # 年の付かない旧品番: LTA-4192 / MTA-439 / LTA-4229L（末尾の L・M・D は種別コードとして品番に含めない）。
+        # ハイフン区切りのときだけ（写真のタグ・トレファクの説明文で確認 2026-11）
+        r'(?<![A-Za-z])[LM]TA\-\d{3,4}(?=[LMD]?(?![A-Za-z0-9\-]))',
     ],
     "ノースフェイス": [
         # ND/NDW=ダウン、NY/NYW・NP/NPW=シェル系。メルカリの表記ゆれ: ND91950 / nd91950 /
@@ -140,6 +149,9 @@ def _normalize_tatras(s: str) -> str:
     m = re.fullmatch(r'([LM]TA)[\s\-](\d{3,4})[\s\-](\d{2})', s.upper())
     if m:
         return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+    m = re.fullmatch(r'([LM]TA)\-(\d{3,4})', s.upper())
+    if m:
+        return f"{m.group(1)}-{m.group(2)}"   # 年の付かない旧品番（LTA-4192）
     return re.sub(r'[\s\-]+', '', s).upper()
 
 
@@ -150,7 +162,7 @@ def _normalize_canadagoose(s: str) -> str:
     num, tail = s[:4], s[4:]
     if tail.endswith("R"):
         tail = tail[:-1]
-    gender = "M" if "M" in tail else "L"
+    gender = "M" if "M" in tail else ("W" if tail == "W" else "L")
     return (num + ("J" if "J" in tail else "") + gender + ("B" if "B" in tail else "")
             + "".join(c for c in tail if c in "AI"))
 
