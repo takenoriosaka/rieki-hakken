@@ -990,9 +990,13 @@ def _merge_cross_listed(deals: list[Deal]) -> list[Deal]:
         t = re.sub(r"【[^】]*】", "", d.item.title)
         t = re.sub(r"[\s/／■◆★☆]+", "", _norm(t))
         return t if len(t) >= 20 else d.item.url
+    # Yahoo!ショッピングは同じ出品のタイトルの末尾に「レディース 古着 中古」等を足すことがあるので、
+    # 片方のタイトルがもう片方の頭の部分（20文字以上）と同じなら同じ商品とみなす
     groups: dict[str, list[Deal]] = {}
-    for d in deals:
-        groups.setdefault(key(d), []).append(d)
+    for d in sorted(deals, key=lambda d: len(key(d))):
+        k = key(d)
+        hit = next((g for g in groups if len(g) >= 20 and k.startswith(g)), None)
+        groups.setdefault(hit or k, []).append(d)
     out = []
     for g in groups.values():
         g.sort(key=lambda d: d.item.price)
