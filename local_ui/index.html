@@ -18,6 +18,7 @@
     </div>
     <nav class="header-nav">
       <button type="button" class="nav-btn" id="navSetup" onclick="showSetup()">条件を選ぶ</button>
+      <button type="button" class="nav-btn" id="navFree" onclick="showFree()">フリーリサーチ</button>
       <button type="button" class="nav-btn" id="navResults" onclick="showResultsView()" hidden>結果を見る</button>
       <button type="button" class="nav-btn nav-running" id="navProgress" onclick="showView('progress')" hidden>調査中…</button>
     </nav>
@@ -27,6 +28,10 @@
 <main class="wrap">
   <!-- ───────── 条件選択（ステップ式） ───────── -->
   <section id="setupView" class="view">
+    <div class="mode-bar">
+      <span class="mode-now">通常モード：登録済みのモデル・型番で照合します</span>
+      <button type="button" class="link-btn" onclick="showFree()">型番にこだわらず自由に探す（フリーリサーチ）→</button>
+    </div>
     <ol class="stepper" id="stepper">
       <li class="stp" data-step="1"><button type="button" onclick="goStep(1)"><span class="dot">1</span><span class="stp-label">ジャンル</span></button></li>
       <li class="stp-line" aria-hidden="true"></li>
@@ -149,6 +154,7 @@
         </span>
       </div>
       <div class="source-grid" id="sourceGrid"></div>
+      <label class="switch-line" id="shoppingNewLine"><input type="checkbox" id="shoppingNew" data-shopping-new> <span>Yahoo!ショッピングは新品も含める（既定は中古のみ・送料込みで計算。PayPayポイントは数えません）</span></label>
 
       <div class="final-box">
         <h3>この内容でリサーチします</h3>
@@ -164,6 +170,94 @@
       <div class="nav-reason" id="navReason" role="status"></div>
       <button type="button" class="nav-next" id="nextBtn" onclick="goStep(currentStep + 1)">次へ →</button>
     </nav>
+  </section>
+
+  <!-- ───────── フリーリサーチ ───────── -->
+  <section id="freeView" class="view" hidden>
+    <div class="mode-bar">
+      <span class="mode-now">フリーリサーチ：ブランドとアイテムの種類で自由に探します（型番照合より相場が大まか）</span>
+      <button type="button" class="link-btn" onclick="showSetup()">← 通常モード（登録モデル・型番）に戻る</button>
+    </div>
+    <div class="last-banner" id="lastBannerFree" hidden></div>
+    <section class="step">
+      <div class="step-head">
+        <h2>フリーリサーチ</h2>
+        <p>登録済みのモデル・型番に限らず、<strong>ブランド × アイテムの種類 × 価格帯</strong>で探します。相場はメルカリの売り切れ（同じブランド・同じ種類）から出すので、型番で照合するより大まかです。結果には<strong>相場の根拠と信頼度</strong>を表示します。</p>
+      </div>
+
+      <div class="free-block">
+        <label for="freeBrandInput" class="field-label">ブランド <small>複数可（「、」区切り）</small></label>
+        <div class="free-brand-row">
+          <input type="text" id="freeBrandInput" class="text-in" list="freeBrandList" placeholder="例: ポールスミス、グッチ" autocomplete="off">
+          <button type="button" class="ghost-btn" onclick="addFreeBrandFromInput()">追加</button>
+        </div>
+        <datalist id="freeBrandList"></datalist>
+        <div class="chips free-picked" id="freeBrandPicked"></div>
+        <div class="mg-label">利益商品共有で多いブランド（件数・平均利益）</div>
+        <div class="chips" id="freeBrandSuggest"></div>
+      </div>
+
+      <div class="free-block">
+        <div class="field-label">ジャンル（アイテムの種類） <small>複数可</small></div>
+        <div class="chips" id="freeGenreChips"></div>
+        <div class="hint" id="freeGenreHint"></div>
+        <label for="freeCustomGenre" class="field-label free-sub">その他の種類を自由入力 <small>任意・「、」区切り</small></label>
+        <input type="text" id="freeCustomGenre" class="text-in" placeholder="例: ベスト、ポロシャツ" autocomplete="off">
+      </div>
+
+      <div class="cond-grid">
+        <div class="cond-card">
+          <h3>仕入れ値の範囲 <small>送料込み</small></h3>
+          <div class="price-range">
+            <div class="num-box"><input type="number" id="freePriceMin" min="0" step="500" inputmode="numeric"><span>円</span></div>
+            <span class="range-sep">〜</span>
+            <div class="num-box"><input type="number" id="freePriceMax" min="0" step="500" inputmode="numeric"><span>円</span></div>
+          </div>
+        </div>
+        <div class="cond-card">
+          <h3>メンズ / レディース</h3>
+          <div class="seg" id="freeGenderSeg"></div>
+          <div class="hint">タイトル・説明文の「メンズ」「レディース」、号サイズ、紳士服のサイズ表記（A5等）、タトラスの品番（MTA/LTA）で判定します。判定できない出品は除かずに「性別不明」と表示します</div>
+        </div>
+        <div class="cond-card">
+          <h3>最低利益額</h3>
+          <div class="num-box"><input type="number" id="freeMinProfit" min="0" step="500" inputmode="numeric"><span>円</span></div>
+        </div>
+        <div class="cond-card">
+          <h3>最低利益率</h3>
+          <div class="num-box"><input type="number" id="freeMinRoi" min="0" step="5" inputmode="numeric"><span>%</span></div>
+        </div>
+        <div class="cond-card">
+          <h3>取得件数 <small>仕入れ先ごと・1検索語あたり</small></h3>
+          <div class="seg seg-presets" id="freePerSourceSeg"></div>
+        </div>
+        <div class="cond-card">
+          <h3>写真の確認</h3>
+          <label class="switch-line" id="freePhotoOcrLine"><input type="checkbox" id="freePhotoOcr"> <span>写真のタグ読み取り（無料・Mac内OCR）</span></label>
+          <label class="switch-line" id="freePhotoLocalLine"><input type="checkbox" id="freePhotoLocal"> <span>写真で傷・汚れ確認（無料・Mac内AI）</span></label>
+          <label class="switch-line" id="freePhotoCheckLine"><input type="checkbox" id="freePhotoCheck"> <span>写真AI確認（有料・Claude API）</span></label>
+          <div class="hint">タグの型番が読めた出品は、その型番の相場に切り替えます（タトラス・モンクレール等の登録済みブランドのダウン・バッグ）</div>
+        </div>
+      </div>
+
+      <div class="sub-head">
+        <h3>仕入れ先</h3>
+        <span class="toolbar">
+          <button type="button" class="ghost-btn" onclick="toggleGroup('sources', true)">すべて選択</button>
+          <button type="button" class="ghost-btn" onclick="toggleGroup('sources', false)">すべて解除</button>
+        </span>
+      </div>
+      <div class="source-grid" id="freeSourceGrid"></div>
+      <label class="switch-line"><input type="checkbox" id="freeShoppingNew" data-shopping-new> <span>Yahoo!ショッピングは新品も含める（既定は中古のみ）</span></label>
+
+      <div class="final-box">
+        <h3>この内容でフリーリサーチします</h3>
+        <dl class="final-summary" id="freeSummary"></dl>
+        <div class="final-line" id="freeFinalLine"></div>
+        <button type="button" class="start-btn" id="freeStartBtn" onclick="startFreeResearch()">🔍 フリーリサーチ開始</button>
+        <div class="error-line" id="freeErrorLine" role="alert"></div>
+      </div>
+    </section>
   </section>
 
   <!-- ───────── 調査中 ───────── -->
@@ -195,7 +289,7 @@
       <div class="hint center" id="progressNote">候補の数は途中経過です。最後に条件（モデル・利益率・重複）で絞り込んだ件数が結果になります。</div>
       <div class="progress-actions" id="progressActions" hidden>
         <button type="button" class="primary-btn" onclick="showResultsView()">結果を見る</button>
-        <button type="button" class="ghost-btn" onclick="goStep(4, true)">条件を変えて再検索</button>
+        <button type="button" class="ghost-btn" onclick="backToConditions()">条件を変えて再検索</button>
       </div>
 
       <details class="log-box">
@@ -213,7 +307,7 @@
         <div class="result-meta" id="resultMeta"></div>
       </div>
       <div class="result-head-btns">
-        <button type="button" class="primary-btn" onclick="goStep(4, true)">条件を変えて再検索</button>
+        <button type="button" class="primary-btn" onclick="backToConditions()">条件を変えて再検索</button>
         <button type="button" class="ghost-btn" onclick="goStep(1, true)">最初から選び直す</button>
       </div>
     </div>
@@ -231,6 +325,7 @@
       </div>
       <div class="filter-row"><span class="filter-label">仕入れ先</span><div class="chips" id="sourceFilter"></div></div>
       <div class="filter-row"><span class="filter-label">ジャンル</span><div class="chips" id="genreFilter"></div></div>
+      <div class="filter-row" id="confFilterRow" hidden><span class="filter-label">相場の信頼度</span><div class="chips" id="confFilter"></div></div>
     </div>
 
     <div class="count-line" id="countLine"></div>

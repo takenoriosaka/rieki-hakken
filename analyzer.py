@@ -270,6 +270,7 @@ def apply_photo_condition(deal: Deal, photo: Optional[dict], commission_rate: fl
     new.brand, new.model, new.category = deal.brand, deal.model, deal.category
     new.search_keyword = deal.search_keyword
     new.photo_condition = photo
+    new.free_info = deal.free_info   # フリーリサーチの相場の根拠など（free_research）
     return new
 
 

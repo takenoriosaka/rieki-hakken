@@ -3,10 +3,10 @@
 
 const STORAGE_KEY = 'rieki-research-conditions-v1';   // 保存形式は従来のまま（前回の選択をそのまま復元）
 const PHOTO_LOCAL_DEFAULT_VERSION = 2;   // 「写真で傷・汚れ確認（無料・Mac内AI）」を既定オンにした版（古い保存値の移行用）
-const SOURCE_LABELS = { yahoo_auctions: 'ヤフオク', mercari_cheap: 'メルカリ安値', sekaist: 'セカスト', vector_park: 'ベクトルパーク', trefac: 'トレファク', rakuma: 'ラクマ', yahoo_flea: 'Yahoo!フリマ' };
-const SOURCE_ICONS = { yahoo_auctions: '🔨', mercari_cheap: '🛍️', sekaist: '👕', vector_park: '💼', trefac: '♻️', rakuma: '📦', yahoo_flea: '🏪' };
-const SOURCE_DESC = { yahoo_auctions: '入札形式・即決の両方', mercari_cheap: 'メルカリの安い出品', sekaist: '', vector_park: 'ブランド買取店の販売', trefac: 'リユース店の通販', rakuma: 'フリマアプリ', yahoo_flea: 'フリマアプリ' };
-const GENRE_ICONS = { '時計': '⌚', 'ダウン': '🧥', 'サングラス': '🕶️', 'アクセサリー': '💍', 'ジュエリー': '💍', 'スカーフ': '🧣', 'バッグ': '👜', '財布': '👛', 'その他': '🏷️' };
+const SOURCE_LABELS = { yahoo_auctions: 'ヤフオク', mercari_cheap: 'メルカリ安値', sekaist: 'セカスト', vector_park: 'ベクトルパーク', trefac: 'トレファク', rakuma: 'ラクマ', yahoo_flea: 'Yahoo!フリマ', yahoo_shopping: 'Yahoo!ショッピング' };
+const SOURCE_ICONS = { yahoo_auctions: '🔨', mercari_cheap: '🛍️', sekaist: '👕', vector_park: '💼', trefac: '♻️', rakuma: '📦', yahoo_flea: '🏪', yahoo_shopping: '🛒' };
+const SOURCE_DESC = { yahoo_auctions: '入札形式・即決の両方', mercari_cheap: 'メルカリの安い出品', sekaist: '', vector_park: 'ブランド買取店の販売', trefac: 'リユース店の通販', rakuma: 'フリマアプリ', yahoo_flea: 'フリマアプリ', yahoo_shopping: 'ストアの中古（送料込みで計算）' };
+const GENRE_ICONS = { '時計': '⌚', 'ダウン': '🧥', 'サングラス': '🕶️', 'アクセサリー': '💍', 'ジュエリー': '💍', 'スカーフ': '🧣', 'バッグ': '👜', '財布': '👛', 'その他': '🏷️', 'セットアップ・スーツ': '🤵', 'ジャケット': '🧥', 'コート': '🧥', 'ダウン・中綿': '🧥', 'トップス': '👕', 'ボトムス': '👖', 'ワンピース': '👗', '靴': '👞', '小物': '🧣' };
 const HOUR_OPTIONS = [['', '指定なし'], ['3', '3時間'], ['6', '6時間'], ['12', '12時間'], ['24', '24時間'], ['72', '3日']];
 const PER_SOURCE_PRESETS = [[20, '少なめ'], [50, '普通'], [80, '多め']];
 
@@ -22,7 +22,7 @@ const state = {
   model_numbers: new Set(),  // "ブランド|型番"
   sources: new Set(),
 };
-const cond = { min_profit: 3000, min_roi: 0, auction_hours: '', auction_only: false, per_source: 20, free_numbers: '', photo_check: false, photo_ocr: true, photo_local: true };
+const cond = { min_profit: 3000, min_roi: 0, auction_hours: '', auction_only: false, per_source: 20, free_numbers: '', photo_check: false, photo_ocr: true, photo_local: true, yahoo_shopping_new: false };
 
 let currentStep = 1;
 let RESULTS = [];
@@ -30,6 +30,7 @@ let LAST = null;               // 直近のステータス（結果つき）
 let currentSort = 'profit';
 let filterSource = '';
 let filterGenre = '';
+let filterConf = '';
 let pollTimer = null;
 let tickTimer = null;
 let lastRunning = null;        // 実行中ステータス（経過時間の毎秒更新用）
@@ -93,8 +94,9 @@ function canReach(step) {
 
 // ── 画面切り替え ─────────────────────────────────────────
 function showView(name) {
-  ['setup', 'progress', 'result'].forEach(v => { $(v + 'View').hidden = v !== name; });
+  ['setup', 'free', 'progress', 'result'].forEach(v => { $(v + 'View').hidden = v !== name; });
   $('navSetup').classList.toggle('on', name === 'setup');
+  $('navFree').classList.toggle('on', name === 'free');
   $('navResults').classList.toggle('on', name === 'result');
   $('navProgress').classList.toggle('on', name === 'progress');
   window.scrollTo(0, 0);
@@ -309,6 +311,8 @@ function renderStep4() {
   // 写真AI確認（有料・Claude API）のチェック（この Mac で API キーが使えるときだけ表示。既定オフ）
   $('photoCheckCard').hidden = !OPTIONS.photo_check_available;
   $('photoCheck').checked = !!cond.photo_check;
+  $('shoppingNew').checked = !!cond.yahoo_shopping_new;
+  $('shoppingNewLine').hidden = !state.sources.has('yahoo_shopping');
   $('perSourceSeg').innerHTML = PER_SOURCE_PRESETS.map(([v, l]) =>
     `<button type="button" class="${Number(cond.per_source) === v ? 'on' : ''}" data-per="${v}"><b>${l}</b><span>${v}件</span></button>`).join('');
   $('sourceGrid').innerHTML = OPTIONS.sources.map(s => {
@@ -403,9 +407,10 @@ document.addEventListener('click', e => {
     const g = t.dataset.toggle, v = t.dataset.value;
     if (state[g].has(v)) state[g].delete(v); else state[g].add(v);
     saveState();
-    renderStep();
+    if (isFreeView()) renderFree(); else renderStep();
     return;
   }
+  if (handleFreeClick(e)) return;
   const ga = e.target.closest('[data-genre-all]');
   if (ga) {
     const on = ga.dataset.on === '1';
@@ -422,6 +427,8 @@ document.addEventListener('click', e => {
   if (so) { currentSort = so.dataset.sort; renderResults(); return; }
   const fs = e.target.closest('[data-fsource]');
   if (fs) { filterSource = fs.dataset.fsource; renderResults(); return; }
+  const fc = e.target.closest('[data-fconf]');
+  if (fc) { filterConf = fc.dataset.fconf; renderResults(); return; }
   const fg = e.target.closest('[data-fgenre]');
   if (fg) { filterGenre = fg.dataset.fgenre; renderResults(); return; }
 });
@@ -447,6 +454,8 @@ document.addEventListener('input', e => {
   renderFinal();
 });
 document.addEventListener('change', e => {
+  if (e.target.matches && e.target.matches('[data-shopping-new]')) { cond.yahoo_shopping_new = e.target.checked; saveState(); if (isFreeView()) renderFreeFinal(); else renderFinal(); }
+  if (handleFreeChange(e)) return;
   if (e.target.id === 'auctionOnly') { cond.auction_only = e.target.checked; saveState(); renderFinal(); }
   if (e.target.id === 'photoCheck') { cond.photo_check = e.target.checked; saveState(); renderFinal(); }
   if (e.target.id === 'photoLocal') { cond.photo_local = e.target.checked; saveState(); renderFinal(); }
@@ -463,7 +472,7 @@ function toggleGroup(group, on) {
   else if (group === 'brands') visibleBrands().forEach(b => state.brands.add(b.name));
   else if (group === 'sources') OPTIONS.sources.forEach(s => state.sources.add(s.key));
   saveState();
-  renderStep();
+  if (isFreeView()) renderFree(); else renderStep();
 }
 
 // ── 前回の選択を保存/復元（localStorage） ───────────────────
@@ -484,6 +493,7 @@ function collectConditions() {
     photo_check: !!(OPTIONS.photo_check_available && cond.photo_check),
     photo_ocr: !!(OPTIONS.photo_ocr_available && cond.photo_ocr),
     photo_local: !!(OPTIONS.photo_local_available && cond.photo_local),
+    yahoo_shopping_new: !!cond.yahoo_shopping_new,
   };
 }
 
@@ -497,6 +507,7 @@ function saveState() {
     // photo_local_v は「既定オンになった後の保存」の印（これが無い古い保存値は既定オンに移行する）
     c.photo_local = !!cond.photo_local;
     c.photo_local_v = PHOTO_LOCAL_DEFAULT_VERSION;
+    c.sources_v2 = 1;   // Yahoo!ショッピング追加後の保存の印
     localStorage.setItem(STORAGE_KEY, JSON.stringify(c));
   } catch (e) { /* 保存できなくても動作には影響なし */ }
 }
@@ -554,6 +565,13 @@ function restoreState() {
   // それより前の保存値（既定オフ時代に自動で保存された false）は一度だけ既定（オン）に移行する
   const localSaved = saved && saved.photo_local_v === PHOTO_LOCAL_DEFAULT_VERSION && typeof saved.photo_local === 'boolean';
   cond.photo_local = localSaved ? saved.photo_local : !!d.photo_local;
+  cond.yahoo_shopping_new = !!saved?.yahoo_shopping_new;
+  // 前回の保存に Yahoo!ショッピング（新しい仕入れ先）が無ければ、他の仕入れ先を全部選んでいたときだけ足す
+  if (saved && Array.isArray(saved.sources) && !saved.sources_v2) {
+    const old = OPTIONS.sources.filter(s => s.key !== 'yahoo_shopping').every(s => saved.sources.includes(s.key));
+    if (old) state.sources.add('yahoo_shopping');
+  }
+  restoreFree();
 }
 
 // ── リサーチ実行 ──────────────────────────────────────────
@@ -565,11 +583,15 @@ async function startResearch() {
   const err = stepError(4);
   if (err) { $('errorLine').textContent = err; return; }
   saveState();
-  $('startBtn').disabled = true;
+  await postResearch(c, 'errorLine', 'startBtn');
+}
+
+async function postResearch(c, errId, btnId) {
+  $(btnId).disabled = true;
   try {
     const res = await fetch('/api/research', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(c) });
     const data = await res.json();
-    if (!data.ok) { $('errorLine').textContent = data.error || '開始できませんでした'; $('startBtn').disabled = false; return; }
+    if (!data.ok) { $(errId).textContent = data.error || '開始できませんでした'; $(btnId).disabled = false; return; }
     RESULTS = [];
     filterSource = ''; filterGenre = '';
     LAST = { state: 'running', index: 0, total: 0, keyword: '', started_at: new Date().toISOString(), logs: [], conditions: c, found_count: 0 };
@@ -577,8 +599,8 @@ async function startResearch() {
     showView('progress');
     startPolling();
   } catch (e) {
-    $('errorLine').textContent = 'サーバーに接続できません（start.command で起動しているか確認してください）';
-    $('startBtn').disabled = false;
+    $(errId).textContent = 'サーバーに接続できません（start.command で起動しているか確認してください）';
+    $(btnId).disabled = false;
   }
 }
 
@@ -625,6 +647,7 @@ function updateNav() {
   $('navResults').hidden = running || !LAST || LAST.state === 'idle' || LAST.state === 'error';
   if (!$('navResults').hidden) $('navResults').textContent = `結果を見る（${(LAST.results || RESULTS).length}件）`;
   if (currentStep === 4) renderFinal();
+  if (isFreeView()) renderFreeFinal();
   renderLastBanner();
 }
 
@@ -644,6 +667,7 @@ function renderLastBanner() {
 function condSummary(c) {
   if (!c || typeof c !== 'object') return '';
   const arr = v => (Array.isArray(v) ? v : []);
+  if (c.mode === 'free') return freeCondSummary(c);
   const cats = arr(c.categories).map(catName);
   const brands = arr(c.brands);
   const srcs = arr(c.sources).map(k => SOURCE_LABELS[k] || k);
@@ -780,6 +804,12 @@ function renderResults() {
   const srcCounts = countBy('source'), genCounts = countBy('category');
   if (filterSource && !srcCounts[filterSource]) filterSource = '';
   if (filterGenre && !genCounts[filterGenre]) filterGenre = '';
+  // フリーリサーチの結果だけ: 相場の信頼度で絞り込む
+  const confCounts = all.reduce((m, r) => { const c = r.free_info && r.free_info.confidence; if (c) m[c] = (m[c] || 0) + 1; return m; }, {});
+  $('confFilterRow').hidden = !Object.keys(confCounts).length;
+  if (filterConf && !confCounts[filterConf]) filterConf = '';
+  $('confFilter').innerHTML = chip('data-fconf', '', 'すべて', all.length, filterConf) +
+    ['高', '中', '低'].filter(k => confCounts[k]).map(k => chip('data-fconf', k, `信頼度 ${k}`, confCounts[k], filterConf)).join('');
   const chip = (attr, val, label, n, cur) => `<button type="button" class="chip ${cur === val ? 'on' : ''}" ${attr}="${esc(val)}">${esc(label)} <span class="chip-n">${n}</span></button>`;
   $('sourceFilter').innerHTML = chip('data-fsource', '', 'すべて', all.length, filterSource) +
     Object.keys(srcCounts).map(k => chip('data-fsource', k, `${SOURCE_ICONS[k] || ''} ${SOURCE_LABELS[k] || k}`, srcCounts[k], filterSource)).join('');
@@ -788,7 +818,8 @@ function renderResults() {
   document.querySelectorAll('#sortSeg [data-sort]').forEach(b => b.classList.toggle('on', b.dataset.sort === currentSort));
 
   const items = all
-    .filter(r => (!filterSource || r.source === filterSource) && (!filterGenre || r.category === filterGenre))
+    .filter(r => (!filterSource || r.source === filterSource) && (!filterGenre || r.category === filterGenre)
+      && (!filterConf || (r.free_info && r.free_info.confidence === filterConf)))
     .sort((a, b) => {
       if (currentSort === 'roi') return b.roi_percent - a.roi_percent;
       if (currentSort === 'remain') {
@@ -827,7 +858,9 @@ function renderResults() {
       const urgent = rs <= 86400;
       remainBadge = `<span class="badge ${urgent ? 'b-urgent' : 'b-remain'}">⏱ ${d.is_auction ? '' : '即決 '}${formatRemain(rs)}</span>`;
     }
-    const searchText = [d.brand, d.model].filter(Boolean).join(' ') || d.keyword;
+    // フリーリサーチ（型番なし）は相場を出した検索語（例: ポールスミス セットアップ メンズ）でメルカリを開く
+    const freeQ = d.free_info && !d.model && d.free_info.genre_market ? (d.free_info.genre_market.queries || [])[0] : '';
+    const searchText = freeQ || [d.brand, d.model].filter(Boolean).join(' ') || d.keyword;
     const searchTextAttr = esc(JSON.stringify(searchText));
     const urlAttr = esc(JSON.stringify(d.url || ''));
     const mercariSearchUrl = `https://jp.mercari.com/search?keyword=${encodeURIComponent(searchText)}&status=sold_out&sort=created_time&order=desc&item_types=1`;
@@ -844,7 +877,7 @@ function renderResults() {
           <div class="profit-roi">利益率 ${esc(d.roi_percent)}%</div>
         </div>
         <div class="price-flow">
-          <div class="pf-box"><div class="pf-label">仕入れ</div><div class="pf-value">${yen(d.purchase_price)}</div></div>
+          <div class="pf-box"><div class="pf-label">仕入れ${d.shipping != null ? '（送料込）' : ''}</div><div class="pf-value">${yen(d.purchase_price)}</div>${shippingNote(d)}</div>
           <div class="pf-arrow" aria-hidden="true">→</div>
           <div class="pf-box"><div class="pf-label">相場</div><div class="pf-value">${yen(d.reference_price)}</div></div>
         </div>
@@ -854,7 +887,9 @@ function renderResults() {
           ${d.model ? `<span class="badge b-model">${esc(d.model)}</span>` : ''}
           ${remainBadge}
           ${d.condition_label && d.condition_label !== '状態不明' && !d.photo_condition ? `<span class="badge b-cond">${esc(d.condition_label)}</span>` : ''}
+          ${freeBadges(d)}
         </div>
+        ${freeInfoHtml(d)}
         ${photoConditionHtml(d)}
         <div class="card-brand">${esc(d.brand || '')}</div>
         <div class="card-title" title="${esc(d.title)}">${esc(d.title)}</div>
@@ -887,6 +922,252 @@ function photoConditionHtml(d) {
     ${list}
     ${p.unchecked ? `<div class="pc-unchecked">写真で確認できなかった箇所: ${esc(p.unchecked)}</div>` : ''}
     <div class="pc-note">※ ${local ? `Mac内の無料AI（${esc(p.model || 'Ollama')}）による出品写真の判定です。有料の判定より見落とし・誤判定が多いので、必ず写真を自分の目で確認してください` : '出品写真からのAI判定です（見落とし・誤判定があり得ます）'}。${used}</div>
+  </div>`;
+}
+
+// ── フリーリサーチ ─────────────────────────────────────
+const FREE_KEY = 'rieki-free-conditions-v1';
+const FREE_GENDERS = ['指定なし', 'メンズ', 'レディース'];
+const free = { brands: [], genres: new Set(), custom: '', price_min: 5000, price_max: 15000, gender: '指定なし' };
+
+function isFreeView() { return !$('freeView').hidden; }
+function showFree() { showView('free'); renderFree(); }
+function backToConditions() {
+  if (LAST && LAST.conditions && LAST.conditions.mode === 'free') showFree(); else goStep(4, true);
+}
+function freeOpts() { return OPTIONS.free || { brands: [], genres: [], features: [], seed_count: 0 }; }
+
+function restoreFree() {
+  let f = null;
+  try { f = JSON.parse(localStorage.getItem(FREE_KEY) || 'null'); } catch (e) { f = null; }
+  if (!f || typeof f !== 'object') return;
+  if (Array.isArray(f.brands)) free.brands = f.brands.filter(b => typeof b === 'string' && b.trim()).slice(0, 20);
+  const known = new Set(freeOpts().genres.map(g => g.key));
+  if (Array.isArray(f.genres)) f.genres.forEach(g => { if (known.has(g)) free.genres.add(g); });
+  if (typeof f.custom === 'string') free.custom = f.custom;
+  if (isFinite(Number(f.price_min))) free.price_min = Math.max(0, Number(f.price_min));
+  if (isFinite(Number(f.price_max))) free.price_max = Math.max(0, Number(f.price_max));
+  if (FREE_GENDERS.includes(f.gender)) free.gender = f.gender;
+}
+function saveFree() {
+  try {
+    localStorage.setItem(FREE_KEY, JSON.stringify({ brands: free.brands, genres: [...free.genres], custom: free.custom,
+      price_min: free.price_min, price_max: free.price_max, gender: free.gender }));
+  } catch (e) { /* 保存できなくても動作には影響なし */ }
+  saveState();
+}
+
+function addFreeBrand(name) {
+  name = String(name || '').trim();
+  if (!name) return;
+  name.split(/[,、，]+/).map(x => x.trim()).filter(Boolean).forEach(b => { if (!free.brands.includes(b)) free.brands.push(b); });
+  saveFree();
+  renderFree();
+}
+function addFreeBrandFromInput() {
+  const el = $('freeBrandInput');
+  addFreeBrand(el.value);
+  el.value = '';
+}
+
+function renderFree() {
+  if (!OPTIONS) return;
+  const fo = freeOpts();
+  $('freeBrandList').innerHTML = fo.brands.map(b => `<option value="${esc(b.name)}">${b.count ? `${b.count}件・平均利益${yen(b.avg_profit)}` : '登録済みのブランド'}</option>`).join('');
+  $('freeBrandPicked').innerHTML = free.brands.length
+    ? free.brands.map(b => `<button type="button" class="chip on" data-free-brand-del="${esc(b)}">✓ ${esc(b)} ✕</button>`).join('')
+    : '<span class="hint">ブランドを入力するか、下の候補から選んでください</span>';
+  $('freeBrandSuggest').innerHTML = fo.brands.filter(b => b.count > 0).slice(0, 24).map(b => {
+    const on = free.brands.includes(b.name);
+    return `<button type="button" class="chip ${on ? 'on' : ''}" data-free-brand="${esc(b.name)}">${on ? '✓ ' : ''}${esc(b.name)} <span class="chip-n">${b.count}件・${yen(b.avg_profit)}</span></button>`;
+  }).join('');
+  // ジャンル: 利益商品共有の件数。選んだブランドの実績があれば「このブランドの実績」も添える
+  const brandGenres = {};
+  fo.brands.filter(b => free.brands.includes(b.name)).forEach(b => Object.entries(b.genres || {}).forEach(([k, n]) => { brandGenres[k] = (brandGenres[k] || 0) + n; }));
+  $('freeGenreChips').innerHTML = fo.genres.map(g => {
+    const on = free.genres.has(g.key);
+    const bn = brandGenres[g.key];
+    return `<button type="button" class="chip ${on ? 'on' : ''}" data-free-genre="${esc(g.key)}">${on ? '✓ ' : ''}${g.icon || ''} ${esc(g.label)} <span class="chip-n">${bn ? `このブランド${bn}件・` : ''}全体${g.count}件</span></button>`;
+  }).join('');
+  $('freeGenreHint').textContent = fo.seed_count ? `件数は利益商品共有（${fo.seed_count}件）で利益が出た商品の数です` : '';
+  if (document.activeElement !== $('freeCustomGenre')) $('freeCustomGenre').value = free.custom;
+  if (document.activeElement !== $('freePriceMin')) $('freePriceMin').value = free.price_min;
+  if (document.activeElement !== $('freePriceMax')) $('freePriceMax').value = free.price_max;
+  $('freeGenderSeg').innerHTML = FREE_GENDERS.map(g => `<button type="button" class="${free.gender === g ? 'on' : ''}" data-free-gender="${g}">${g}</button>`).join('');
+  if (document.activeElement !== $('freeMinProfit')) $('freeMinProfit').value = cond.min_profit;
+  if (document.activeElement !== $('freeMinRoi')) $('freeMinRoi').value = cond.min_roi;
+  $('freePerSourceSeg').innerHTML = PER_SOURCE_PRESETS.map(([v, l]) =>
+    `<button type="button" class="${Number(cond.per_source) === v ? 'on' : ''}" data-per="${v}"><b>${l}</b><span>${v}件</span></button>`).join('');
+  $('freePhotoOcrLine').hidden = !OPTIONS.photo_ocr_available;
+  $('freePhotoOcr').checked = !!cond.photo_ocr;
+  $('freePhotoLocalLine').hidden = !OPTIONS.photo_local_installed;
+  $('freePhotoLocal').disabled = !OPTIONS.photo_local_available;
+  $('freePhotoLocal').checked = !!(OPTIONS.photo_local_available && cond.photo_local);
+  $('freePhotoCheckLine').hidden = !OPTIONS.photo_check_available;
+  $('freePhotoCheck').checked = !!cond.photo_check;
+  $('freeSourceGrid').innerHTML = OPTIONS.sources.map(s => {
+    const on = state.sources.has(s.key);
+    return `
+    <button type="button" class="pick-card source-card ${on ? 'on' : ''}" aria-pressed="${on}" data-toggle="sources" data-value="${esc(s.key)}">
+      <span class="check" aria-hidden="true"></span>
+      <span class="src-icon" aria-hidden="true">${SOURCE_ICONS[s.key] || '🏬'}</span>
+      <span class="src-text">
+        <span class="src-name">${esc(s.label)}${s.auction ? ' <span class="auction-badge">オークション</span>' : ''}</span>
+        <span class="src-desc">${esc(SOURCE_DESC[s.key] || '')}</span>
+      </span>
+    </button>`;
+  }).join('');
+  $('freeShoppingNew').checked = !!cond.yahoo_shopping_new;
+  renderFreeFinal();
+}
+
+function freeGenreLabels(keys, custom) {
+  const fo = freeOpts();
+  const labels = (keys || []).map(k => (fo.genres.find(g => g.key === k) || {}).label).filter(Boolean);
+  return labels.concat(String(custom || '').split(/[,、，]+/).map(x => x.trim()).filter(Boolean));
+}
+function freeError() {
+  if (!free.brands.length) return 'ブランドを1つ以上入力してください';
+  if (!freeGenreLabels([...free.genres], free.custom).length) return 'ジャンルを1つ以上選ぶか、自由入力してください';
+  if (!state.sources.size) return '仕入れ先を1つ以上選んでください';
+  if (Number(free.price_max) > 0 && Number(free.price_min) > Number(free.price_max)) return '仕入れ値の範囲（下限 > 上限）を見直してください';
+  return '';
+}
+// 所要時間の目安（分）: 検索語（ブランドの表記 × ジャンルの検索語）× 仕入れ先 + 相場 + 説明文の確認
+function freeEstimate() {
+  const fo = freeOpts();
+  const enSet = new Set(fo.en_brands || []);
+  const en = free.brands.reduce((a, b) => a + (enSet.has(b) ? 2 : 1), 0);   // 英字名でも検索するブランドは2本
+  const gq = [...free.genres].reduce((a, k) => a + ((fo.genres.find(g => g.key === k) || {}).queries || 1), 0)
+    + freeGenreLabels([], free.custom).length;
+  const q = en * gq;
+  const src = Math.max(1, state.sources.size);
+  const per = Number(cond.per_source) || 20;
+  const total = q * src * (0.1 + per / 120) + free.brands.length * gq * 0.4 + q * src * per * 0.35 / 60;
+  return { q: Math.round(q), lo: Math.max(1, Math.round(total * 0.6)), hi: Math.max(2, Math.round(total * 1.5)) };
+}
+function renderFreeFinal() {
+  if (!OPTIONS || !$('freeSummary')) return;
+  const g = freeGenreLabels([...free.genres], free.custom);
+  const srcs = OPTIONS.sources.filter(s => state.sources.has(s.key)).map(s => s.label);
+  const rows = [
+    ['ブランド', free.brands.join('・')],
+    ['ジャンル', g.join('・')],
+    ['仕入れ値', `${num(free.price_min)}円〜${Number(free.price_max) > 0 ? num(free.price_max) + '円' : '上限なし'}（送料込み）`],
+    ['性別', free.gender],
+    ['仕入れ先', srcs.join('・') + (state.sources.has('yahoo_shopping') ? (cond.yahoo_shopping_new ? '（Yahoo!ショッピングは新品も）' : '（Yahoo!ショッピングは中古のみ）') : '')],
+    ['利益', profitText()],
+    ['取得件数', `${cond.per_source}件`],
+  ];
+  $('freeSummary').innerHTML = rows.map(([k, v]) => `<div class="fs-row"><dt>${k}</dt><dd class="${v ? '' : 'missing'}">${esc(v || '未選択')}</dd></div>`).join('');
+  const err = freeError();
+  const e = freeEstimate();
+  const f = m => (m >= 60 ? `${Math.floor(m / 60)}時間${m % 60 ? (m % 60) + '分' : ''}` : `${m}分`);
+  $('freeFinalLine').innerHTML = err ? `<span class="warn">⚠ ${esc(err)}</span>`
+    : `検索語 約<b>${e.q}</b>本 × 仕入れ先 <b>${state.sources.size}</b>か所・所要時間の目安 <b>約${f(e.lo)}〜${f(e.hi)}</b>（写真の確認の時間は別）`;
+  $('freeStartBtn').disabled = !!err || isRunning();
+}
+
+function collectFreeConditions() {
+  const c = collectConditions();
+  return { ...c, mode: 'free', categories: [], brands: [], models: [], model_numbers: [], free_numbers: '',
+    free_brands: free.brands.slice(), free_genres: [...free.genres], free_custom_genre: free.custom,
+    free_price_min: String(free.price_min), free_price_max: String(free.price_max), free_gender: free.gender };
+}
+async function startFreeResearch() {
+  $('freeErrorLine').textContent = '';
+  const err = freeError();
+  if (err) { $('freeErrorLine').textContent = err; return; }
+  saveFree();
+  await postResearch(collectFreeConditions(), 'freeErrorLine', 'freeStartBtn');
+}
+function freeCondSummary(c) {
+  const parts = [`フリーリサーチ：${(c.free_brands || []).join('・')}`, freeGenreLabels(c.free_genres, c.free_custom_genre).join('・')];
+  if (c.free_gender && c.free_gender !== '指定なし') parts.push(c.free_gender);
+  parts.push(`${num(c.free_price_min)}〜${num(c.free_price_max)}円`);
+  if (c.min_profit !== undefined && c.min_profit !== '') parts.push(`利益${num(c.min_profit)}円以上`);
+  return parts.filter(Boolean).join(' / ');
+}
+
+function handleFreeClick(e) {
+  const t = e.target;
+  const del = t.closest('[data-free-brand-del]');
+  if (del) { free.brands = free.brands.filter(b => b !== del.dataset.freeBrandDel); saveFree(); renderFree(); return true; }
+  const sb = t.closest('[data-free-brand]');
+  if (sb) {
+    const b = sb.dataset.freeBrand;
+    if (free.brands.includes(b)) free.brands = free.brands.filter(x => x !== b); else free.brands.push(b);
+    saveFree(); renderFree(); return true;
+  }
+  const g = t.closest('[data-free-genre]');
+  if (g) { const k = g.dataset.freeGenre; if (free.genres.has(k)) free.genres.delete(k); else free.genres.add(k); saveFree(); renderFree(); return true; }
+  const gd = t.closest('[data-free-gender]');
+  if (gd) { free.gender = gd.dataset.freeGender; saveFree(); renderFree(); return true; }
+  const ps = t.closest('#freePerSourceSeg [data-per]');
+  if (ps) { cond.per_source = Number(ps.dataset.per); saveState(); renderFree(); return true; }
+  return false;
+}
+function handleFreeChange(e) {
+  const id = e.target.id;
+  if (id === 'freeCustomGenre') { free.custom = e.target.value; saveFree(); renderFree(); return true; }
+  if (id === 'freePriceMin') { free.price_min = Math.max(0, Number(e.target.value) || 0); saveFree(); renderFree(); return true; }
+  if (id === 'freePriceMax') { free.price_max = Math.max(0, Number(e.target.value) || 0); saveFree(); renderFree(); return true; }
+  if (id === 'freeMinProfit') { cond.min_profit = Math.max(0, Number(e.target.value) || 0); saveState(); renderFree(); return true; }
+  if (id === 'freeMinRoi') { cond.min_roi = Math.max(0, Number(e.target.value) || 0); saveState(); renderFree(); return true; }
+  if (id === 'freePhotoOcr') { cond.photo_ocr = e.target.checked; saveState(); renderFreeFinal(); return true; }
+  if (id === 'freePhotoLocal') { cond.photo_local = e.target.checked; saveState(); renderFreeFinal(); return true; }
+  if (id === 'freePhotoCheck') { cond.photo_check = e.target.checked; saveState(); renderFreeFinal(); return true; }
+  return false;
+}
+document.addEventListener('keydown', e => {
+  if (e.target && e.target.id === 'freeBrandInput' && e.key === 'Enter' && !e.isComposing) { e.preventDefault(); addFreeBrandFromInput(); }
+});
+
+// 送料（Yahoo!ショッピング）
+function shippingNote(d) {
+  if (d.shipping == null) return '';
+  if (!d.shipping) return '<div class="pf-note">送料無料</div>';
+  return `<div class="pf-note">本体${yen(d.base_price)}＋送料${yen(d.shipping)}${d.postage_estimated ? '（仮）' : ''}</div>`;
+}
+// フリーリサーチ: 信頼度・性別のバッジ
+function freeBadges(d) {
+  const f = d.free_info;
+  if (!f) return '';
+  const g = f.gender === '不明' ? '性別不明' : f.gender;
+  return `<span class="badge conf conf-${esc(f.confidence)}">相場の信頼度 ${esc(f.confidence)}</span><span class="badge b-gender">${esc(g)}</span>`;
+}
+// フリーリサーチ: 相場の根拠・下振れ時の利益・注目ポイント
+function freeInfoHtml(d) {
+  const f = d.free_info;
+  if (!f) return '';
+  const gm = f.genre_market, mm = f.model_market;
+  let basis = '';
+  if (f.basis === 'model' && mm) {
+    basis = `型番 <b>${esc(mm.model)}</b>（${esc(mm.from)}で判明）の売り切れ ${num(mm.n)}件・中央値 ${yen(mm.median)}（${yen(mm.min)}〜${yen(mm.max)}）で計算`;
+    if (gm) basis += `<br><span class="fi-sub">参考: 同じブランド・種類の売り切れ ${num(gm.n)}件・中央値 ${yen(gm.median)}</span>`;
+  } else if (gm) {
+    basis = `メルカリ売り切れ ${num(gm.n)}件（「${esc((gm.queries || []).join('」「'))}」）・中央値 <b>${yen(gm.median)}</b>・中央50%は ${yen(gm.q1)}〜${yen(gm.q3)}（ばらつき ${Math.round(gm.spread * 100)}%）`;
+  }
+  const range = f.profit_low != null
+    ? `<div class="fi-range">利益の幅（相場の中央50%で計算）: <b class="${f.profit_low < 0 ? 'neg' : ''}">${f.profit_low >= 0 ? '+' : ''}${yen(f.profit_low)}</b> 〜 <b>+${yen(f.profit_high)}</b></div>` : '';
+  const feats = (f.features || []).map(x => {
+    let cmp = '';
+    if (x.without_median != null && x.with_n) {
+      const sign = x.diff_pct > 0 ? '+' : '';
+      cmp = `：売り切れでこの特徴あり ${yen(x.with_median)}（${x.with_n}件）/ なし ${yen(x.without_median)}（${x.without_n}件）<b class="${x.diff_pct >= 0 ? 'pos' : 'neg'}">${sign}${x.diff_pct}%</b>`;
+    } else if (x.with_n) {
+      cmp = `：売り切れでこの特徴あり ${yen(x.with_median)}（${x.with_n}件・比べる件数が少ない）`;
+    }
+    return `<li><span class="fi-tag">${esc(x.tag)}</span><small>${esc(x.where || '')}</small>${cmp}</li>`;
+  }).join('');
+  const note = f.basis === 'model' ? '' : '<div class="fi-note">※ 型番ではなく「ブランド＋アイテムの種類」の相場です。モデル・素材・サイズで値段が大きく違うことがあるので、メルカリで似た商品の売り切れを確認してください</div>';
+  return `<div class="free-info">
+    <div class="fi-head">📊 相場の根拠</div>
+    <div class="fi-basis">${basis}</div>
+    ${range}
+    ${feats ? `<div class="fi-head">⭐ 注目ポイント</div><ul class="fi-feats">${feats}</ul>` : ''}
+    ${(f.also_on || []).length ? `<div class="fi-sub">同じ商品が他の仕入れ先にも: ${f.also_on.map(a => `<a href="${esc(a.url)}" target="_blank" rel="noopener">${esc(SOURCE_LABELS[a.source] || a.source)} ${yen(a.price)}</a>`).join('・')}</div>` : ''}
+    ${note}
   </div>`;
 }
 

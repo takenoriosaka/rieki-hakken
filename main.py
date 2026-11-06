@@ -30,7 +30,7 @@ import photo_reader
 from models import Deal
 from scrapers import yahoo_auctions
 from scrapers import mercari as mercari_scraper
-from scrapers import vector_park, trefac_fashion, rakuma, yahoo_flea_market
+from scrapers import vector_park, trefac_fashion, rakuma, yahoo_flea_market, yahoo_shopping
 
 CONFIG_PATH = "config.json"
 
@@ -47,6 +47,7 @@ DESCRIPTION_FETCHERS = {
     "trefac":         (trefac_fashion.get_description, 1),
     "rakuma":         (rakuma.get_description, 1),
     "yahoo_flea":     (yahoo_flea_market.get_description, 1),
+    "yahoo_shopping": (yahoo_shopping.get_description, 1),
 }
 
 # requests で1件ずつ商品写真のURLを取得する仕入れ先: source → (取得関数, 取得間隔秒)。写真から型番を読む機能
@@ -59,6 +60,7 @@ IMAGE_FETCHERS = {
     "trefac":         (trefac_fashion.get_image_urls, 1),
     "rakuma":         (rakuma.get_image_urls, 1),
     "yahoo_flea":     (yahoo_flea_market.get_image_urls, 1),
+    "yahoo_shopping": (yahoo_shopping.get_image_urls, 1),
 }
 
 # スキャン統計（説明文。相場取得の統計は analyzer.stats、写真読み取りの統計は photo_reader.stats）
@@ -72,6 +74,7 @@ SOURCE_LABELS = {
     "trefac":         "トレファク",
     "rakuma":         "ラクマ",
     "yahoo_flea":     "Yahoo!フリマ",
+    "yahoo_shopping": "Yahoo!ショッピング",
 }
 
 
@@ -184,8 +187,10 @@ def scan(
     # 無料: Mac 内の AI（Ollama）が使え、画面の「写真で傷・汚れ確認（無料・Mac内AI）」をオンにしたとき）
     analyzer.set_photo_check(photo_reader.condition_enabled() or local_inspector.enabled())
     # 前回スキャンで控えた商品写真のURLを捨てる（ローカル画面を起動したまま何度スキャンしても溜まらないように）
-    for mod in (yahoo_auctions, mercari_scraper, vector_park, trefac_fashion, rakuma, yahoo_flea_market):
+    for mod in (yahoo_auctions, mercari_scraper, vector_park, trefac_fashion, rakuma, yahoo_flea_market,
+                yahoo_shopping):
         mod._image_urls.clear()
+    yahoo_shopping._descriptions.clear()
 
     # Playwright ブラウザはスキャン全体で1つだけ起動し使い回す（毎回起動すると
     # 型番/価格帯ごとのメルカリ相場ルックアップが数百回発生し、1件19秒前後×件数で
@@ -217,6 +222,54 @@ def scan(
             print(f"[スキャン統計] {photo_reader.summary()}")
         if local_inspector.stats["inspect_targets"] or local_inspector.stats["read_targets"]:
             print(f"[スキャン統計] {local_inspector.summary()}")
+
+
+def source_fetchers(page, settings: dict, max_buy: int, min_buy: int, per_source: int,
+                    exclude_words: list, immediate_only: bool = False) -> list[tuple]:
+    """仕入れ先ごとの検索関数の一覧 [(仕入れ先キー, 検索語 → Item の一覧)]（SOURCE_LABELS の順）。
+    通常のスキャン（_scan_keywords）とフリーリサーチ（free_research）で共用する"""
+    return [
+        ("yahoo_auctions", lambda q: yahoo_auctions.get_cheap_listings(
+            q, max_price=max_buy,
+            min_price=min_buy,
+            count=per_source,
+            exclude_words=exclude_words,
+            immediate_only=immediate_only,
+        )),
+        ("mercari_cheap", lambda q: mercari_scraper.get_cheap_listings(
+            page, q, max_price=max_buy,
+            count=per_source,
+            exclude_words=exclude_words,
+        )),
+        ("vector_park", lambda q: vector_park.get_cheap_listings(
+            q, max_price=max_buy, min_price=min_buy,
+            count=per_source,
+            exclude_words=exclude_words,
+        )),
+        ("trefac", lambda q: trefac_fashion.get_cheap_listings(
+            q, max_price=max_buy, min_price=min_buy,
+            count=per_source,
+            exclude_words=exclude_words,
+        )),
+        ("rakuma", lambda q: rakuma.get_cheap_listings(
+            q, max_price=max_buy, min_price=min_buy,
+            count=per_source,
+            exclude_words=exclude_words,
+        )),
+        ("yahoo_flea", lambda q: yahoo_flea_market.get_cheap_listings(
+            q, max_price=max_buy, min_price=min_buy,
+            count=per_source,
+            exclude_words=exclude_words,
+        )),
+        # Yahoo!ショッピング: 中古のみが既定（settings.yahoo_shopping_condition: used / new / all）。
+        # 送料無料でない出品の送料は、タイトルの照合のあと fill_postage で商品ページから足す
+        ("yahoo_shopping", lambda q: yahoo_shopping.get_cheap_listings(
+            q, max_price=max_buy, min_price=min_buy,
+            count=per_source,
+            exclude_words=exclude_words,
+            condition=settings.get("yahoo_shopping_condition", "used"),
+        )),
+    ]
 
 
 def _scan_keywords(
@@ -289,40 +342,8 @@ def _scan_keywords(
         per_source = settings["search_items_per_source"]
 
         # (仕入れ先キー, 取得関数) の順に検索する。sources で選ばれたものだけ実行
-        fetchers = [
-            ("yahoo_auctions", lambda q: yahoo_auctions.get_cheap_listings(
-                q, max_price=max_buy,
-                min_price=min_buy,
-                count=per_source,
-                exclude_words=exclude_words,
-                immediate_only=immediate_only,
-            )),
-            ("mercari_cheap", lambda q: mercari_scraper.get_cheap_listings(
-                page, q, max_price=max_buy,
-                count=per_source,
-                exclude_words=exclude_words,
-            )),
-            ("vector_park", lambda q: vector_park.get_cheap_listings(
-                q, max_price=max_buy, min_price=min_buy,
-                count=per_source,
-                exclude_words=exclude_words,
-            )),
-            ("trefac", lambda q: trefac_fashion.get_cheap_listings(
-                q, max_price=max_buy, min_price=min_buy,
-                count=per_source,
-                exclude_words=exclude_words,
-            )),
-            ("rakuma", lambda q: rakuma.get_cheap_listings(
-                q, max_price=max_buy, min_price=min_buy,
-                count=per_source,
-                exclude_words=exclude_words,
-            )),
-            ("yahoo_flea", lambda q: yahoo_flea_market.get_cheap_listings(
-                q, max_price=max_buy, min_price=min_buy,
-                count=per_source,
-                exclude_words=exclude_words,
-            )),
-        ]
+        fetchers = source_fetchers(page, settings, max_buy, min_buy, per_source,
+                                   exclude_words, immediate_only)
         seen_item_urls: set[str] = set()
         fetchers = [(k, f) for k, f in fetchers if sources is None or k in sources]
         n_search = len(fetchers) * len(queries)   # このキーワードの検索の本数（仕入れ先 × 検索語）
@@ -418,6 +439,8 @@ def _scan_keywords(
             removed = before - len(sources_items)
             if removed > 0:
                 print(f"  [条件フィルター] {removed} 件除外")
+
+        sources_items = fill_shopping_postage(sources_items, settings, should_stop)
 
         # ── 型番照合モード ──────────────────────────────────────
         # require_model_number=true の場合:
@@ -708,6 +731,22 @@ def _scan_keywords(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+
+def fill_shopping_postage(items: list, settings: dict, should_stop=None) -> list:
+    """Yahoo!ショッピングの送料無料でない出品は、商品ページの送料（東京都あて）を仕入れ値に足す。
+    在庫なし・販売終了の出品は除く（yahoo_shopping.fill_postage）。他の仕入れ先の出品はそのまま"""
+    if not any(it.source == "yahoo_shopping" and it.shipping is None for it in items):
+        return items
+    n = sum(1 for it in items if it.source == "yahoo_shopping" and it.shipping is None)
+    print(f"  [Yahoo!ショッピング] 送料無料でない {n}件の送料を商品ページで確認中...")
+    out, st = yahoo_shopping.fill_postage(
+        items, default_postage=settings.get("yahoo_shopping_default_postage", yahoo_shopping.DEFAULT_POSTAGE),
+        should_stop=should_stop)
+    est = f"・送料が取れず仮に ¥{settings.get('yahoo_shopping_default_postage', yahoo_shopping.DEFAULT_POSTAGE):,} を足した {st['estimated']}件" \
+        if st["estimated"] else ""
+    print(f"  [Yahoo!ショッピング] 送料を確認 {st['fetched']}件（在庫なし・販売終了で除外 {st['sold_out']}件{est}）")
+    return out
+
 
 def _check_photo_conditions(deals: list[Deal], settings: dict, page, total: int,
                             progress=None, should_stop=None) -> list[Deal]:

@@ -35,6 +35,7 @@ os.environ["RIEKI_LOCAL_APP"] = "1"     # main.run() 側の push 防止ガード
 from flask import Flask, jsonify, request, send_from_directory  # noqa: E402
 
 import database          # noqa: E402
+import free_research     # noqa: E402
 import main as scan_main  # noqa: E402
 import model_extractor   # noqa: E402
 import local_inspector   # noqa: E402
@@ -203,7 +204,16 @@ def build_options() -> dict:
         {"key": k, "label": v, "auction": k == "yahoo_auctions"}
         for k, v in scan_main.SOURCE_LABELS.items()
     ]
+    try:
+        free = free_research.suggestions(list(brands))
+    except Exception as e:   # 候補が作れなくても画面は出す
+        print(f"[app] フリーリサーチの候補の読み込みエラー: {e}")
+        free = {"brands": [{"name": b, "count": 0, "avg_profit": 0, "genres": {}, "registered": True} for b in brands],
+                "genres": [{"key": g["key"], "label": g["label"], "icon": g["icon"], "count": 0}
+                           for g in free_research.GENRES], "features": [], "seed_count": 0}
     return {
+        # フリーリサーチモードの入力候補（ブランド・ジャンル・注目ポイント。利益商品共有のデータの件数つき）
+        "free": free,
         "categories": categories,
         "brands": list(brands.values()),
         "models": models,
@@ -436,6 +446,12 @@ def _deal_to_dict(d) -> dict:
         "photo_condition": d.photo_condition,
         "end_time": d.item.end_time,
         "is_auction": d.item.is_auction,
+        # 仕入れ値に含めた送料（Yahoo!ショッピング）。None = 送料は別（従来どおり）
+        "shipping": d.item.shipping,
+        "base_price": d.item.base_price,
+        "postage_estimated": d.item.postage_estimated,
+        # フリーリサーチモードの相場の根拠・信頼度・性別・注目ポイント（通常のモードでは None）
+        "free_info": d.free_info,
     }
 
 
@@ -545,6 +561,36 @@ def _run_job(req: dict):
         settings["photo_ocr_enabled"] = req.get("photo_ocr", True) is not False
         # 写真で傷・汚れ確認（無料・Mac内AI）: 画面のチェック（画面の既定はオン。項目が無い古い画面からはオフ）
         settings["photo_local_check_enabled"] = req.get("photo_local") is True
+        # Yahoo!ショッピング: 既定は中古のみ。画面で「新品も含める」にしたときだけ新品も検索する
+        settings["yahoo_shopping_condition"] = "all" if req.get("yahoo_shopping_new") is True else "used"
+
+        def progress(i, total, keyword, q_index=0, q_total=0):
+            # q_index / q_total: そのキーワードの中で何本目の検索か（仕入れ先 × 検索語。0 始まり）
+            with JOB.lock:
+                JOB.total = total
+                JOB.index = i
+                JOB.keyword = keyword
+                JOB.q_index = q_index
+                JOB.q_total = q_total
+
+        if req.get("mode") == "free":
+            # フリーリサーチモード（登録済みのモデル・型番に縛られない。free_research 参照）
+            fp = free_research.parse_request(req)
+            with JOB.lock:
+                JOB.total = max(1, len(fp["brands"]) * len(fp["genres"]))
+            database.init_db()
+            deals = free_research.scan(req, settings, sources=sources, progress=progress,
+                                       should_stop=lambda: JOB.stop_requested)
+            best: dict[str, object] = {}
+            for d in deals:
+                if d.roi_percent < min_roi:
+                    continue
+                prev = best.get(d.item.url)
+                if prev is None or d.estimated_profit > prev.estimated_profit:
+                    best[d.item.url] = d
+            _finish_job(sorted((_deal_to_dict(d) for d in best.values()),
+                               key=lambda r: r["estimated_profit"], reverse=True))
+            return
 
         plan = build_plan(req, cfg)
         with JOB.lock:
@@ -571,14 +617,6 @@ def _run_job(req: dict):
         aliases = _model_aliases()
         model_of = {kw["name"]: m for kw, m in plan}
 
-        def progress(i, total, keyword, q_index=0, q_total=0):
-            # q_index / q_total: そのキーワードの中で何本目の検索か（仕入れ先 × 検索語。0 始まり）
-            with JOB.lock:
-                JOB.index = i
-                JOB.keyword = keyword
-                JOB.q_index = q_index
-                JOB.q_total = q_total
-
         database.init_db()
         deals = scan_main.scan(
             [kw for kw, _ in plan], settings,
@@ -597,22 +635,24 @@ def _run_job(req: dict):
             prev = best.get(d.item.url)
             if prev is None or d.estimated_profit > prev.estimated_profit:
                 best[d.item.url] = d
-        results = sorted((_deal_to_dict(d) for d in best.values()),
-                         key=lambda r: r["estimated_profit"], reverse=True)
-
-        with JOB.lock:
-            JOB.results = results
-            JOB.index = JOB.total if not JOB.stop_requested else JOB.index
-            JOB.state = "stopped" if JOB.stop_requested else "done"
-            JOB.finished_at = datetime.now().isoformat(timespec="seconds")
-        print(f"ローカル リサーチ完了: {len(results)} 件")
-        _save_last()
+        _finish_job(sorted((_deal_to_dict(d) for d in best.values()),
+                           key=lambda r: r["estimated_profit"], reverse=True))
     except Exception as e:
         traceback.print_exc()
         with JOB.lock:
             JOB.state = "error"
             JOB.error = str(e)
             JOB.finished_at = datetime.now().isoformat(timespec="seconds")
+
+
+def _finish_job(results: list[dict]) -> None:
+    with JOB.lock:
+        JOB.results = results
+        JOB.index = JOB.total if not JOB.stop_requested else JOB.index
+        JOB.state = "stopped" if JOB.stop_requested else "done"
+        JOB.finished_at = datetime.now().isoformat(timespec="seconds")
+    print(f"ローカル リサーチ完了: {len(results)} 件")
+    _save_last()
 
 
 def _save_last():

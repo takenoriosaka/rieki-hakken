@@ -88,3 +88,31 @@ python generate_dashboard.py --open  # ダッシュボードHTMLだけ再生成�
 - `.rieki_friend_mode`（git 管理外）がある環境＝知り合いの Mac だけ、追跡ファイルのローカル変更を git stash してから更新する。
   本人の Mac にはこのファイルを置かないこと（置くと未コミット変更が stash される）。
 - config.json は git 管理。型番を追加して commit & push すれば、知り合いの次回起動時に反映される。
+
+## 仕入れ先 Yahoo!ショッピング（2026-11-06 追加）
+- `scrapers/yahoo_shopping.py`（仕入れ先キー `yahoo_shopping`）。ログインなし・Cookie なしの GET で、検索結果 `/search/<検索語>/0/<ページ>/` と
+  商品ページ `store.shopping.yahoo.co.jp/<店>/<商品>.html` の `__NEXT_DATA__` を読む。公式 API（Client ID が必要）は使っていない。
+- robots.txt で禁止されている検索パラメータ（pf/pt=価格、n=件数、view、ship 等）と `/searchbff/*/search/postageInfo` は使わない。
+  使うのは `used`（1=中古 / 2=新品）・`X=2`（安い順）とページ番号だけ。価格の範囲は安い順に読んで上限を超えたら打ち切る（最大10ページ）。
+- 既定は中古のみ（`settings.yahoo_shopping_condition`、既定 "used"。画面の「Yahoo!ショッピングは新品も含める」で "all"）。
+- 仕入れ値は **表示価格＋送料**（PayPay ポイント・クーポンは数えない）。送料無料でない出品は、タイトルの照合のあと
+  `main.fill_shopping_postage` → `yahoo_shopping.fill_postage` で商品ページの `postage.fee`（東京都あて）を足す。取れなければ
+  `settings.yahoo_shopping_default_postage`（既定 1,000円）を仮に足す。在庫なし・販売終了はここで除く。`Item.shipping` / `base_price`。
+- 中古ランク（検索結果 labels.hasUsed20/40/60/80 ＝ 目立った傷や汚れなし/やや傷や汚れあり/傷や汚れあり/全体的に状態が悪い）が
+  タイトルの状態より悪ければ、その言葉をタイトルの末尾に【】で足して condition_checker に効かせる。
+- 写真は `https://item-shopping.c.yimg.jp/i/l/<画像ID>`（長辺600px）。説明文・写真は商品ページを1回読んだら控えて再取得しない。
+
+## フリーリサーチモード（2026-11-06 追加）
+- `free_research.py`。ローカル画面のヘッダー「フリーリサーチ」。登録済みのモデル・型番に縛られず、ブランド（自由入力）×
+  ジャンル（`GENRES`: セットアップ・スーツ/ジャケット/コート/ダウン/トップス/ボトムス/ワンピース/バッグ/靴/小物＋自由入力）×
+  仕入れ値の範囲（送料込み）× メンズ/レディース/指定なし で全仕入れ先を検索する。`/api/research` に `mode: "free"`。
+- 相場: メルカリ売り切れ（ログインなし）を「ブランド + ジャンルの検索語（+ メンズ/レディース）」で取り、タイトルにブランド・
+  ジャンルの語があり、別アイテム・キッズ・付属品・まとめ売り・「〜風」・逆の性別でないものだけ。上下10%を除いた中央値・四分位。
+  信頼度: 高=20件以上かつ (Q3−Q1)/中央値 ≤0.6、中=8件以上かつ ≤1.0、低=それ以外（3件未満は相場なし）。売り切れは
+  `free_market_cache` テーブル（DB）に price_cache_hours 保存し、絞り込みは毎回やり直す。
+- 性別: `detect_gender`（タイトル→説明文→タトラス品番 MTA/LTA→スカート等のアイテム→紳士服サイズ A5 等）。不明は除かずに表示。
+- 注目ポイント: `FEATURES`（利益商品共有 seed.json の特徴タグのうち文字で読めるもの）。売り切れの中でその特徴あり/なしの中央値を比べる。
+- 型番: config.json に同じ ブランド×ジャンル のキーワードがある組（タトラス×ダウン 等）だけ、タイトル・説明文・写真のOCRで型番が
+  取れたら型番の相場（analyzer.get_market_price、3件以上）に切り替える（信頼度 高）。
+- ブランドの英字表記（`EXTRA_ALIASES`）は model_extractor.BRAND_ALIASES に無いものだけ実行中に足す。仕入れ先は `EN_QUERY` の英字名でも検索する。
+- 入力候補: 登録済みのブランド＋ ~/program/rieki-shohin-share/data/seed.json の件数・平均利益（投稿者名は使わない）。

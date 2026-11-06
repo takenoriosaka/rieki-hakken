@@ -14,6 +14,11 @@ class Item:
     # True = 入札で落とすオークション形式（即決価格なし）。
     # 即決/定額/フリマ形式は False（残り時間の絞り込み対象外）。
     is_auction: bool = False
+    # 送料（円）。価格 price に送料を含めた仕入れ先（Yahoo!ショッピング）だけ設定する。
+    # None = 未確認（送料込みでない）。base_price は送料を足す前の表示価格
+    shipping: Optional[int] = None
+    base_price: Optional[int] = None
+    postage_estimated: bool = False   # True = 送料が取れず仮の金額を足した
 
 
 @dataclass
@@ -45,6 +50,8 @@ class Deal:
     # 写真から判定した状態（photo_reader。rank / issues / confidence / unchecked）。未確認なら None
     photo_condition: Optional[dict] = None
     text_condition_label: str = ""   # タイトルから判定した状態（写真の判定と組み合わせる前）
+    # フリーリサーチモード（free_research）の相場の根拠・信頼度・性別・注目ポイント等。通常のモードでは None
+    free_info: Optional[dict] = None
 
     def format_source(self) -> str:
         labels = {
@@ -55,5 +62,6 @@ class Deal:
             "trefac":         "トレファク",
             "rakuma":         "ラクマ",
             "yahoo_flea":     "Yahoo!フリマ",
+            "yahoo_shopping": "Yahoo!ショッピング",
         }
         return labels.get(self.item.source, self.item.source)

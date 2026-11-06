@@ -21,7 +21,7 @@ from datetime import datetime
 # project root に database.py があるので sys.path を通す
 sys.path.insert(0, os.path.dirname(__file__))
 import database
-from scrapers import rakuma, yahoo_auctions
+from scrapers import rakuma, yahoo_auctions, yahoo_shopping
 
 OUT_DIR       = "docs"
 OUT_FILE      = os.path.join(OUT_DIR, "index.html")
@@ -36,6 +36,7 @@ SOURCE_LABELS = {
     "trefac":         "トレファク",
     "rakuma":         "ラクマ",
     "yahoo_flea":     "Yahoo!フリマ",
+    "yahoo_shopping": "Yahoo!ショッピング",
 }
 
 
@@ -77,9 +78,10 @@ def _filter_ended_deals(deals: list[dict]) -> list[dict]:
     ヤフオク検索に混ざる Yahoo!フリマ出品（仕入れ先 yahoo_flea）と Yahoo!フリマの出品も、
     売り切れ・削除済みなら除外する（判定は yahoo_auctions.is_ended → yahoo_flea_market.is_ended）。
     ラクマの出品も売り切れ（SOLD OUT）・削除済みなら除外する（判定は rakuma.is_ended）。
+    Yahoo!ショッピングの出品も在庫なし・販売終了・削除済みなら除外する（判定は yahoo_shopping.is_ended）。
     旧形式で保存された Yahoo!フリマ出品のヤフオクURL（404）は Yahoo!フリマのURLに直して表示する。"""
     filtered = []
-    excluded = {"yahoo": 0, "rakuma": 0}
+    excluded = {"yahoo": 0, "rakuma": 0, "shopping": 0}
     for deal in deals:
         source = deal.get("source")
         if source in ("yahoo_auctions", "yahoo_flea"):
@@ -103,10 +105,21 @@ def _filter_ended_deals(deals: list[dict]) -> list[dict]:
             if ended:
                 excluded["rakuma"] += 1
                 continue
+        elif source == "yahoo_shopping":
+            try:
+                ended = yahoo_shopping.is_ended(deal.get("url") or "")
+            except Exception as e:
+                print(f"[Dashboard] Yahoo!ショッピング在庫判定エラー ({deal.get('url')}): {e}")
+                ended = False
+            time.sleep(1)
+            if ended:
+                excluded["shopping"] += 1
+                continue
         filtered.append(deal)
 
     print(f"終了済みヤフオク・Yahoo!フリマ商品を除外: {excluded['yahoo']}件")
     print(f"売り切れのラクマ商品を除外: {excluded['rakuma']}件")
+    print(f"在庫なしの Yahoo!ショッピング商品を除外: {excluded['shopping']}件")
     return filtered
 
 
