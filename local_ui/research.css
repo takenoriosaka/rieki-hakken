@@ -413,3 +413,7 @@ a.tile-best:hover { box-shadow: var(--shadow-hover); }
 .pc-none { color: var(--muted); }
 .pc-unchecked { color: var(--muted); margin-top: 4px; }
 .pc-note { color: var(--faint); font-size: 11.5px; margin-top: 4px; }
+
+/* 写真で傷・汚れ確認（無料・Mac内AI）の判定の目印・使えないときの理由 */
+.pc-src { font-size: 12px; font-weight: 600; color: var(--amber-text); background: var(--amber-bg); border-radius: 6px; padding: 1px 7px; }
+.hint.warn { color: var(--amber-text); }

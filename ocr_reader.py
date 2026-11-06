@@ -18,8 +18,7 @@ model_extractor で照合する（read_listings）。外部の API は使わな�
   （model_extractor の形式を増やしたら OCR し直さずに反映される）。
 ・ログインなし（Cookie 等は使わない）。写真のダウンロードは photo_reader.download_bytes を使う。
 
-傷・汚れの判定（状態）は将来、Mac 内のローカル VLM（Ollama 等）で行う予定。その入口は inspect_deals_local
-（今は何もしない）。
+傷・汚れの判定（状態）は Mac 内のローカル AI（Ollama）で行う（local_inspector。入口は inspect_deals_local でも呼べる）。
 """
 
 import hashlib
@@ -265,7 +264,7 @@ def read_listings(items: list, brand: str, category: str, get_images, should_sto
 
 
 def inspect_deals_local(deals: list, get_images, should_stop=None) -> dict[str, dict]:
-    """（将来用の入口）Mac 内のローカル VLM（Ollama 等）で案件の写真の傷・汚れを判定する。
-    返り値は photo_reader.inspect_deals と同じ形 {item.url: {"rank", "issues", "confidence", "unchecked"}}。
-    まだ実装していないので何もしない（{} を返す。状態はタイトルの表記だけで計算される）"""
-    return {}
+    """Mac 内のローカル AI（Ollama）で案件の写真の傷・汚れを判定する（local_inspector.inspect_deals に任せる）。
+    返り値は photo_reader.inspect_deals と同じ形 {item.url: {"rank", "issues", "confidence", "unchecked"}}"""
+    import local_inspector
+    return local_inspector.inspect_deals(deals, get_images, should_stop=should_stop)

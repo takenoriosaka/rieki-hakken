@@ -24,6 +24,7 @@ import analyzer
 import condition_checker
 import database
 import model_extractor
+import local_inspector
 import ocr_reader
 import photo_reader
 from models import Deal
@@ -178,8 +179,10 @@ def scan(
         _stats[k] = 0
     photo_reader.reset_session(settings)
     ocr_reader.reset_session(settings)
-    # 案件の写真で傷・汚れを確認するスキャンか（本人の Mac でキーがあり、画面でオフにしていないときだけ）
-    analyzer.set_photo_check(photo_reader.condition_enabled())
+    local_inspector.reset_session(settings)
+    # 案件の写真で傷・汚れを確認するスキャンか（有料: 本人の Mac でキーがあり画面でオンにしたとき /
+    # 無料: Mac 内の AI（Ollama）が使え、画面の「写真で傷・汚れ確認（無料・Mac内AI）」をオンにしたとき）
+    analyzer.set_photo_check(photo_reader.condition_enabled() or local_inspector.enabled())
     # 前回スキャンで控えた商品写真のURLを捨てる（ローカル画面を起動したまま何度スキャンしても溜まらないように）
     for mod in (yahoo_auctions, mercari_scraper, vector_park, trefac_fashion, rakuma, yahoo_flea_market):
         mod._image_urls.clear()
@@ -212,6 +215,8 @@ def scan(
             print(f"[スキャン統計] {ocr_reader.summary()}")
         if photo_reader.enabled() or photo_reader.stats["api_calls"]:
             print(f"[スキャン統計] {photo_reader.summary()}")
+        if local_inspector.stats["inspect_targets"] or local_inspector.stats["read_targets"]:
+            print(f"[スキャン統計] {local_inspector.summary()}")
 
 
 def _scan_keywords(
@@ -539,6 +544,21 @@ def _scan_keywords(
                             still.append(item)
                     unresolved = still
 
+                # OCR でも型番が無い出品は、Mac 内の AI（Ollama）にタグの文字を書き写させて同じ照合をする
+                # （無料。既定オフ: settings.photo_local_read_enabled。local_inspector.read_listings）
+                if unresolved and local_inspector.read_enabled():
+                    vlm_models = local_inspector.read_listings(
+                        unresolved, brand_name, category,
+                        lambda todo: _get_image_urls(todo, page), should_stop=should_stop)
+                    still = []
+                    for item in unresolved:
+                        if item.url in vlm_models:
+                            candidates.append((item, vlm_models[item.url]))
+                            remember_name(item, vlm_models[item.url], vlm_models[item.url])
+                        else:
+                            still.append(item)
+                    unresolved = still
+
                 # OCR でも型番が無い出品は、有料の写真AI確認をオンにしたときだけ Claude で写真を読む。
                 # .env に API キーがある本人の Mac で、画面で「写真AI確認（有料）」をオンにしたときだけ動く
                 # （既定はオフ。photo_reader 参照）。
@@ -691,7 +711,7 @@ def _scan_keywords(
 
 def _check_photo_conditions(deals: list[Deal], settings: dict, page, total: int,
                             progress=None, should_stop=None) -> list[Deal]:
-    """案件の写真で傷・汚れを確認し（photo_reader.inspect_deals）、タイトルの状態と保守的に組み合わせて
+    """案件の写真で傷・汚れを確認し（有料 photo_reader.inspect_deals → 残りを無料 local_inspector.inspect_deals）、タイトルの状態と保守的に組み合わせて
     （悪いほう。condition_checker.combine）利益を計算し直す。条件の利益を下回った案件は外す。
     写真を確認できなかった案件（料金上限・エラー・中断）はタイトルの状態だけで計算し直す
     （写真を確認する予定のスキャンでは、タイトルで状態不明の出品を仮に「目立った傷なし」で残しているため）。
@@ -704,6 +724,13 @@ def _check_photo_conditions(deals: list[Deal], settings: dict, page, total: int,
             progress(max(total - 1, 0), total, f"写真で傷・汚れを確認中（案件 {len(deals)}件）")
         photos = photo_reader.inspect_deals(
             deals, lambda todo: _get_image_urls(todo, page), should_stop=should_stop)
+        # 無料の Mac 内 AI（有料の確認をしなかった・できなかった案件だけ。結果に source="local" が付く）
+        rest = [d for d in deals if d.item.url not in photos]
+        if rest and local_inspector.enabled() and not (should_stop and should_stop()):
+            if progress:
+                progress(max(total - 1, 0), total, f"写真で傷・汚れを確認中（無料・Mac内AI・案件 {len(rest)}件）")
+            photos.update(local_inspector.inspect_deals(
+                rest, lambda todo: _get_image_urls(todo, page), should_stop=should_stop))
     out: list[Deal] = []
     dropped_unchecked = 0
     for d in deals:
@@ -717,19 +744,26 @@ def _check_photo_conditions(deals: list[Deal], settings: dict, page, total: int,
         text_factor = condition_checker.check(d.item.title).factor
         if new is None:
             if photo:
-                photo_reader.stats["dropped"] += 1
+                _photo_stats(photo)["dropped"] += 1
                 print(f"  [写真で状態確認] {photo['rank']} のため利益が条件を下回り除外: {d.item.title[:40]}")
             else:
                 dropped_unchecked += 1
             continue
         if photo and new.condition_factor < text_factor:
-            photo_reader.stats["downgraded"] += 1
+            _photo_stats(photo)["downgraded"] += 1
         out.append(new)
     if dropped_unchecked:
         print(f"  [写真で状態確認] 写真を確認できず、タイトルの状態（状態不明）では利益が条件を下回る {dropped_unchecked}件を除外")
-    print(f"[写真で状態確認] 案件 {len(deals)}件 → {len(out)}件（状態を下げて残した {photo_reader.stats['downgraded']}件・"
-          f"利益不足で除外 {photo_reader.stats['dropped']}件）")
+    down = photo_reader.stats["downgraded"] + local_inspector.stats["downgraded"]
+    drop = photo_reader.stats["dropped"] + local_inspector.stats["dropped"]
+    print(f"[写真で状態確認] 案件 {len(deals)}件 → {len(out)}件（状態を下げて残した {down}件・"
+          f"利益不足で除外 {drop}件）")
     return out
+
+
+def _photo_stats(photo: dict) -> dict:
+    """写真の判定の統計の入れ先（無料の Mac 内 AI の判定か、有料の Claude の判定か）"""
+    return local_inspector.stats if photo.get("source") == "local" else photo_reader.stats
 
 
 def _get_image_urls(items: list, page) -> dict[str, list[str] | None]:

@@ -47,6 +47,15 @@ def init_db():
                 fetched_at TEXT NOT NULL
             );
 
+            -- 写真から Mac 内の AI（Ollama）で判定した状態（傷・汚れ）のキャッシュ（local_inspector）
+            -- photos_key は判定の版＋モデル名＋写真URLの一覧のハッシュ。有料版（photo_inspect_cache）とは別
+            CREATE TABLE IF NOT EXISTS photo_local_inspect_cache (
+                url        TEXT PRIMARY KEY,
+                photos_key TEXT NOT NULL,
+                result     TEXT NOT NULL,
+                fetched_at TEXT NOT NULL
+            );
+
             -- 写真の文字を Mac 内の OCR で読んだ結果（説明文でも型番が取れなかった出品。ocr_reader）
             -- photos_key は OCR の版＋写真URLの一覧のハッシュ。text は読めた文字の全文（'' は文字なし）
             CREATE TABLE IF NOT EXISTS photo_ocr_cache (
@@ -324,6 +333,50 @@ def cache_photo_inspect(url: str, photos_key: str, result: dict, max_age_hours: 
         )
         conn.execute(
             "DELETE FROM photo_inspect_cache WHERE fetched_at < ?",
+            ((now - timedelta(hours=max_age_hours)).isoformat(),),
+        )
+
+
+def get_cached_photo_local_inspects(pairs: list[tuple[str, str]], max_age_hours: int) -> dict[str, dict]:
+    """Mac 内の AI で判定済みの状態を返す（pairs = [(url, photos_key)]。キーが同じものだけ。{url: 判定}）"""
+    if not pairs:
+        return {}
+    want = dict(pairs)
+    urls = list(want)
+    cutoff = (datetime.now() - timedelta(hours=max_age_hours)).isoformat()
+    out: dict[str, dict] = {}
+    with _conn() as conn:
+        for i in range(0, len(urls), 500):
+            chunk = urls[i:i + 500]
+            marks = ",".join("?" * len(chunk))
+            rows = conn.execute(
+                f"SELECT url, photos_key, result FROM photo_local_inspect_cache "
+                f"WHERE url IN ({marks}) AND fetched_at > ?",
+                (*chunk, cutoff),
+            ).fetchall()
+            for url, key, result in rows:
+                if key != want.get(url):
+                    continue
+                try:
+                    data = json.loads(result)
+                except ValueError:
+                    continue
+                if isinstance(data, dict) and data.get("rank"):
+                    out[url] = data
+    return out
+
+
+def cache_photo_local_inspect(url: str, photos_key: str, result: dict, max_age_hours: int) -> None:
+    """Mac 内の AI で判定した状態を保存する"""
+    now = datetime.now()
+    with _conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO photo_local_inspect_cache (url, photos_key, result, fetched_at) "
+            "VALUES (?, ?, ?, ?)",
+            (url, photos_key, json.dumps(result, ensure_ascii=False), now.isoformat()),
+        )
+        conn.execute(
+            "DELETE FROM photo_local_inspect_cache WHERE fetched_at < ?",
             ((now - timedelta(hours=max_age_hours)).isoformat(),),
         )
 

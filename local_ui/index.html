@@ -123,6 +123,12 @@
           <label class="switch-line"><input type="checkbox" id="photoOcr"> <span>写真のタグ読み取り（無料・Mac内OCR）</span></label>
           <div class="hint">タイトルにも説明文にも型番が無い出品は、出品写真の文字（品質表示タグ等）を Mac の中で読み取って型番を探します。料金はかかりません（読み取り済みの写真は再度読みません）</div>
         </div>
+        <div class="cond-card" id="photoLocalCard" hidden>
+          <h3>写真で傷・汚れ確認 <small>無料・Mac内AI</small></h3>
+          <label class="switch-line"><input type="checkbox" id="photoLocal"> <span>写真で傷・汚れ確認（無料・Mac内AI）</span></label>
+          <div class="hint" id="photoLocalHint">利益が出る商品の写真を Mac の中の AI（Ollama）で1枚ずつ見て傷・汚れを判定し、タイトルの状態より悪ければ相場を下げて計算します。料金はかかりません（1件あたり数十秒かかります。判定済みの写真は再度見ません）。有料の Claude より見落とし・誤判定が多いので参考程度に</div>
+          <div class="hint warn" id="photoLocalReason" hidden></div>
+        </div>
         <div class="cond-card" id="photoCheckCard" hidden>
           <h3>写真AI確認 <small>有料・Claude API</small></h3>
           <label class="switch-line"><input type="checkbox" id="photoCheck"> <span>写真AI確認（有料・Claude API）</span></label>

@@ -37,6 +37,7 @@ from flask import Flask, jsonify, request, send_from_directory  # noqa: E402
 import database          # noqa: E402
 import main as scan_main  # noqa: E402
 import model_extractor   # noqa: E402
+import local_inspector   # noqa: E402
 import ocr_reader        # noqa: E402
 import photo_reader      # noqa: E402
 
@@ -239,10 +240,23 @@ def build_options() -> dict:
             "photo_check": False,
             # 写真のタグ読み取り（無料・Mac内OCR）のチェックの既定（この Mac で使えるときはオン）
             "photo_ocr": ocr_reader.available(),
+            # 写真で傷・汚れ確認（無料・Mac内AI = Ollama）のチェックの既定（精度を確かめるまでオフ）
+            "photo_local": False,
         },
         "photo_check_available": photo_reader.status()[0],
         "photo_ocr_available": ocr_reader.available(),
+        # Mac内AI: Ollama が入っていなければ項目ごと出さない（installed）。入っていてサーバーが止まっていれば起動を試みる
+        **_local_options(),
     }
+
+
+def _local_options() -> dict:
+    """Mac内AI（Ollama）の項目を画面に出すか・使えるか（使えないときの理由は日本語で）"""
+    if not local_inspector.installed():
+        return {"photo_local_installed": False, "photo_local_available": False, "photo_local_reason": ""}
+    ok, reason = local_inspector.check_server(start=True)
+    return {"photo_local_installed": True, "photo_local_available": ok, "photo_local_reason": reason,
+            "photo_local_model": local_inspector.DEFAULTS["photo_local_model"]}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -467,6 +481,8 @@ class _Job:
                 "photo_read": photo_reader.status_info(),
                 # 写真のタグ読み取り（無料・Mac内OCR）の有効/無効とスキャン統計
                 "photo_ocr": ocr_reader.status_info(),
+                # 写真で傷・汚れ確認（無料・Mac内AI）の有効/無効とスキャン統計
+                "photo_local": local_inspector.status_info(),
             }
             if with_results:
                 out["results"] = self.results
@@ -526,6 +542,8 @@ def _run_job(req: dict):
         settings["photo_check_enabled"] = req.get("photo_check") is True
         # 写真のタグ読み取り（無料・Mac内OCR）: 画面のチェック。項目が無いときはオン
         settings["photo_ocr_enabled"] = req.get("photo_ocr", True) is not False
+        # 写真で傷・汚れ確認（無料・Mac内AI）: 画面でチェックを入れたときだけ（既定オフ）
+        settings["photo_local_check_enabled"] = req.get("photo_local") is True
 
         plan = build_plan(req, cfg)
         with JOB.lock:

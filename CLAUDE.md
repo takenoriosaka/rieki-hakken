@@ -64,7 +64,20 @@ python generate_dashboard.py --open  # ダッシュボードHTMLだけ再生成�
 - **有料の写真AI確認（photo_reader）は既定オフ**（`settings.photo_check_enabled` 既定 False。画面の「写真AI確認（有料・Claude API）」は
   毎回オフから始まり、前回の選択も復元しない）。オンにしたときだけ OCR でも型番が無い出品を Claude で読み、案件の傷・汚れも判定する。
   既定の設定では Anthropic API は一切呼ばれない。
-- 傷・汚れのローカル判定（Ollama 等のローカル VLM）は未実装。入口は `ocr_reader.inspect_deals_local`（今は {} を返す）。
+- 傷・汚れのローカル判定は `local_inspector.py`（下の「写真で傷・汚れ確認（無料・Mac内AI）」）。`ocr_reader.inspect_deals_local` からも呼べる。
+
+## 写真で傷・汚れ確認（無料・Mac内AI、2026-11-06 追加）
+- `local_inspector.py`: 案件の写真を Mac 内の Ollama（http://127.0.0.1:11434、既定モデル `qwen3-vl:8b-instruct`）に1枚ずつ見せ、
+  傷・汚れの種類ごとに yes/maybe/no で答えさせて（英語の指示・JSON スキーマ指定）、重さ×yes の数から5段階のランクにする（`_aggregate`）。
+  結果は有料版と同じ形（＋`source: "local"`, `model`）で、`condition_checker.combine`・`analyzer.apply_photo_condition` をそのまま使う。
+- 有料の写真AI確認もオンのときは有料の判定を優先し、判定できなかった案件だけ無料で見る（`main._check_photo_conditions`）。
+- キャッシュ photo_local_inspect_cache（キー＝`_LOCAL_VERSION`＋モデル名＋写真URL一覧）。有料版のキャッシュとは別。
+- ローカル画面のステップ4「写真で傷・汚れ確認（無料・Mac内AI）」（`settings.photo_local_check_enabled`、既定オフ）。
+  Ollama が入っていない Mac（知り合いの Mac 等）では項目ごと出さない。入っていて止まっていれば `ollama serve` を起動してみる
+  （ログは logs/ollama_serve.log）。インストールはしない。
+- 本人の Mac: Ollama は Homebrew（`brew install ollama`、/opt/homebrew/bin/ollama）。ログイン項目・brew services には登録していない。
+- タグの文字の読み取り（`local_inspector.read_listings`、`settings.photo_local_read_enabled`、既定オフ）: OCR でも型番が無い出品の
+  タグ写真を AI に書き写させ、`ocr_reader.extract_model` で照合する。
 
 ## 知り合いとの共有（2026-10 追加）
 - リポジトリ `takenoriosaka/rieki-hakken` は **public** で運用（招待・GitHub アカウントは不要）。個人情報や秘密情報をコミットしないこと。

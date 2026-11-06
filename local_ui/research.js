@@ -21,7 +21,7 @@ const state = {
   model_numbers: new Set(),  // "ブランド|型番"
   sources: new Set(),
 };
-const cond = { min_profit: 3000, min_roi: 0, auction_hours: '', auction_only: false, per_source: 20, free_numbers: '', photo_check: false, photo_ocr: true };
+const cond = { min_profit: 3000, min_roi: 0, auction_hours: '', auction_only: false, per_source: 20, free_numbers: '', photo_check: false, photo_ocr: true, photo_local: false };
 
 let currentStep = 1;
 let RESULTS = [];
@@ -299,6 +299,12 @@ function renderStep4() {
   // 写真のタグ読み取り（無料・Mac内OCR）のチェック（この Mac で使えるときだけ表示）
   $('photoOcrCard').hidden = !OPTIONS.photo_ocr_available;
   $('photoOcr').checked = !!cond.photo_ocr;
+  // 写真で傷・汚れ確認（無料・Mac内AI）: Ollama が入っている Mac だけ表示。起動していない・モデルが無いときは理由を出して押せなくする
+  $('photoLocalCard').hidden = !OPTIONS.photo_local_installed;
+  $('photoLocal').disabled = !OPTIONS.photo_local_available;
+  $('photoLocal').checked = !!(OPTIONS.photo_local_available && cond.photo_local);
+  $('photoLocalReason').hidden = !!OPTIONS.photo_local_available || !OPTIONS.photo_local_installed;
+  $('photoLocalReason').textContent = OPTIONS.photo_local_reason ? `今は使えません: ${OPTIONS.photo_local_reason}` : '';
   // 写真AI確認（有料・Claude API）のチェック（この Mac で API キーが使えるときだけ表示。既定オフ）
   $('photoCheckCard').hidden = !OPTIONS.photo_check_available;
   $('photoCheck').checked = !!cond.photo_check;
@@ -374,6 +380,7 @@ function renderFinal() {
     ['取得件数', `${preset ? preset[1] : ''} ${cond.per_source}件`],
   ];
   if (OPTIONS.photo_ocr_available) rows.push(['写真のタグ読み取り', cond.photo_ocr ? 'する（無料・Mac内OCR）' : 'しない']);
+  if (OPTIONS.photo_local_available) rows.push(['写真で傷・汚れ確認', cond.photo_local ? 'する（無料・Mac内AI）' : 'しない']);
   if (OPTIONS.photo_check_available) rows.push(['写真AI確認（有料）', cond.photo_check ? 'する（Claude API・型番タグ・傷汚れ）' : 'しない（料金なし）']);
   $('finalSummary').innerHTML = rows.map(([k, v]) =>
     `<div class="fs-row"><dt>${k}</dt><dd class="${v ? '' : 'missing'}">${esc(v || '未選択')}</dd></div>`).join('');
@@ -441,6 +448,7 @@ document.addEventListener('input', e => {
 document.addEventListener('change', e => {
   if (e.target.id === 'auctionOnly') { cond.auction_only = e.target.checked; saveState(); renderFinal(); }
   if (e.target.id === 'photoCheck') { cond.photo_check = e.target.checked; saveState(); renderFinal(); }
+  if (e.target.id === 'photoLocal') { cond.photo_local = e.target.checked; saveState(); renderFinal(); }
   if (e.target.id === 'photoOcr') { cond.photo_ocr = e.target.checked; saveState(); renderFinal(); }
   if (e.target.id === 'minProfit' || e.target.id === 'minRoi') { syncNumber(e.target.id, e.target.id === 'minProfit' ? cond.min_profit : cond.min_roi); e.target.value = e.target.id === 'minProfit' ? cond.min_profit : cond.min_roi; }
 });
@@ -474,6 +482,7 @@ function collectConditions() {
     sources: [...state.sources],
     photo_check: !!(OPTIONS.photo_check_available && cond.photo_check),
     photo_ocr: !!(OPTIONS.photo_ocr_available && cond.photo_ocr),
+    photo_local: !!(OPTIONS.photo_local_available && cond.photo_local),
   };
 }
 
@@ -536,6 +545,8 @@ function restoreState() {
   cond.photo_check = !!d.photo_check;
   // 写真のタグ読み取り（無料）: 前回オフにしていればオフのまま。保存が無ければ既定（使える Mac ならオン）
   cond.photo_ocr = typeof saved?.photo_ocr === 'boolean' && OPTIONS.photo_ocr_available ? saved.photo_ocr : !!d.photo_ocr;
+  // 写真で傷・汚れ確認（無料・Mac内AI）: 前回の選択を復元（保存が無ければ既定のオフ）
+  cond.photo_local = typeof saved?.photo_local === 'boolean' ? saved.photo_local : !!d.photo_local;
 }
 
 // ── リサーチ実行 ──────────────────────────────────────────
@@ -671,7 +682,7 @@ function showProgress(s) {
     $('progressNote').textContent = '';
   }
   updateTimes(s);
-  renderPhotoRead(s.photo_read, s.photo_ocr);
+  renderPhotoRead(s.photo_read, s.photo_ocr, s.photo_local);
   const box = $('logBox');
   const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 10;
   box.textContent = (s.logs || []).join('\n');
@@ -855,6 +866,7 @@ function photoConditionHtml(d) {
   const p = d.photo_condition;
   if (!p || !p.rank) return '';
   const issues = Array.isArray(p.issues) ? p.issues : [];
+  const local = p.source === 'local';
   const list = issues.length
     ? `<ul class="pc-issues">${issues.map(x => `<li><span class="sev sev-${esc(x.severity)}">${esc(x.severity)}</span>${esc(x.location)}${x.location && x.issue ? 'の' : ''}${esc(x.issue)}</li>`).join('')}</ul>`
     : '<div class="pc-none">写真で傷・汚れは見つかりませんでした</div>';
@@ -862,17 +874,17 @@ function photoConditionHtml(d) {
     ? `相場の計算に写真の判定を使用（${esc(d.condition_label)}）`
     : `相場の計算はタイトルの状態（${esc(d.text_condition_label || d.condition_label || '状態不明')}）を使用`;
   return `<div class="photo-cond">
-    <div class="pc-head"><span class="badge pc-rank ${PHOTO_RANK_CLASS[p.rank] || ''}">📷 ${esc(p.rank)}</span><span class="pc-conf">確信度 ${esc(p.confidence || '—')}</span></div>
+    <div class="pc-head"><span class="badge pc-rank ${PHOTO_RANK_CLASS[p.rank] || ''}">📷 ${esc(p.rank)}</span>${local ? '<span class="pc-src">無料AIの判定</span>' : ''}<span class="pc-conf">確信度 ${esc(p.confidence || '—')}</span></div>
     ${list}
     ${p.unchecked ? `<div class="pc-unchecked">写真で確認できなかった箇所: ${esc(p.unchecked)}</div>` : ''}
-    <div class="pc-note">※ 出品写真からのAI判定です（見落とし・誤判定があり得ます）。${used}</div>
+    <div class="pc-note">※ ${local ? `Mac内の無料AI（${esc(p.model || 'Ollama')}）による出品写真の判定です。有料の判定より見落とし・誤判定が多いので、必ず写真を自分の目で確認してください` : '出品写真からのAI判定です（見落とし・誤判定があり得ます）'}。${used}</div>
   </div>`;
 }
 
 // ── 初期化 ───────────────────────────────────────────────
 // 写真から型番を読む機能の有効/無効（ヘッダーに小さく）と、スキャン中・後の読み取り件数・概算料金（調査中の画面）
-function renderPhotoRead(p, o) {
-  if (!p && !o) return;
+function renderPhotoRead(p, o, l) {
+  if (!p && !o && !l) return;
   $('photoStatus').hidden = false;
   $('photoStatus').textContent = [o && o.label, p && p.label].filter(Boolean).join(' / ');
   const lines = [];
@@ -884,6 +896,10 @@ function renderPhotoRead(p, o) {
   if (p && p.enabled && (st.targets || st.inspect_targets || st.api_calls)) {
     lines.push(`📷 写真AI確認（有料）：型番 採用 ${num(st.adopted)}件 / 対象 ${num(st.targets)}件・傷汚れ 判定 ${num(st.inspected)}件（状態を下げて残した ${num(st.downgraded)}件・利益不足で除外 ${num(st.dropped)}件）・API ${num(st.api_calls)}回・概算 ${num(Math.round(st.cost_yen || 0))}円`
       + (st.stopped ? '（料金上限で停止）' : ''));
+  }
+  const lst = (l && l.stats) || {};
+  if (l && lst.inspect_targets) {
+    lines.push(`🖥 写真で傷・汚れ確認（無料・Mac内AI）：判定 ${num(lst.inspected)}件 / 対象 ${num(lst.inspect_targets)}件（キャッシュ ${num(lst.inspect_cached)}件・状態を下げて残した ${num(lst.downgraded)}件・利益不足で除外 ${num(lst.dropped)}件）・写真 ${num(lst.photos)}枚`);
   }
   $('photoStats').hidden = !lines.length;
   if (lines.length) $('photoStats').textContent = lines.join('　');
@@ -902,7 +918,7 @@ async function init() {
   let s = null;
   try { s = await (await fetch('/api/status?results=1')).json(); } catch (e) { s = null; }
   if (!s) return;
-  renderPhotoRead(s.photo_read, s.photo_ocr);
+  renderPhotoRead(s.photo_read, s.photo_ocr, s.photo_local);
   LAST = s;
   if (s.state === 'running') {
     showProgress(s);
