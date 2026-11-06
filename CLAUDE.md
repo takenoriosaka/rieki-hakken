@@ -37,7 +37,8 @@ python generate_dashboard.py --open  # ダッシュボードHTMLだけ再生成�
 - `generate_dashboard.py` - ダッシュボードHTML生成
 - `docs/index.html` - 生成済みダッシュボード（GitHub Pages: `takenoriosaka/rieki-hakken` リポジトリ）
 - `arbitrage.db` - SQLiteキャッシュ・履歴DB（gitignore済み）
-- `photo_reader.py` - 写真から型番を読む（型番照合で説明文にも型番が無い出品の写真を Claude API で読む。結果は photo_read_cache）
+- `ocr_reader.py` - 写真のタグから型番を無料で読む（Mac 内蔵の OCR = Apple Vision。説明文にも型番が無い出品が対象。結果は photo_ocr_cache）
+- `photo_reader.py` - 写真AI確認（有料・Claude API。既定オフ）。OCR でも型番が無い出品のタグ読み取りと、案件の傷・汚れ判定。結果は photo_read_cache / photo_inspect_cache
 - `set_api_key.command` - Claude の API キーを `.env` に登録する（ダブルクリック。キー自体は含まない）
 - `.env` - `ANTHROPIC_API_KEY`（写真から型番を読む機能を使うときだけ。gitignore済み。キーを絶対にコミットしないこと）
 
@@ -49,7 +50,21 @@ python generate_dashboard.py --open  # ダッシュボードHTMLだけ再生成�
 - 2026-11 追加: 同じ API 呼び出しで写真の傷・汚れも判定する（5段階: 新品同様/目立った傷なし/やや傷あり/傷あり/状態悪い。
   `photo_reader.inspect_deals` → 結果は photo_inspect_cache（URL＋写真URL一覧＋判定基準の版 `_INSPECT_VERSION` で照合））。
   タイトルの状態と悪いほうを取り（`condition_checker.combine`）、利益を計算し直す（`analyzer.apply_photo_condition`、`main._check_photo_conditions`）。
-  ローカル画面のステップ4「写真AI確認」のチェックで1回ごとにオン/オフ（`settings.photo_check_enabled`）。料金上限は品番・状態で共有。
+  ローカル画面のステップ4「写真AI確認（有料・Claude API）」のチェックで1回ごとにオン/オフ（`settings.photo_check_enabled`、2026-11-06 から既定オフ）。料金上限は品番・状態で共有。
+
+## 写真のタグ読み取り（無料・Mac内OCR、2026-11-06 追加）
+- 型番照合でタイトル・説明文に型番が無い出品は、まず `ocr_reader.read_listings` で写真を OCR（Apple Vision の
+  VNRecognizeTextRequest、accurate、ja-JP+en-US、言語補正なし）し、読めた文字を説明文と同じく `model_extractor` で照合する。
+  型番は1行ずつ照合し、見つからなければ OCR の読み間違い（数字に隣接する O→0・I/l→1、タトラスの先頭 I→L）を直した行でも探す。
+  モデル名は写真にブランド名も写っているときだけ採用。
+- 使えるのは macOS で `pyobjc-framework-Vision`（requirements.txt。darwin のみ）が入っているときだけ。料金なし・ログインなし。
+- キャッシュ photo_ocr_cache: キー＝出品URL＋写真URL一覧＋`_OCR_VERSION`。OCR の全文を保存し、照合はキャッシュからも毎回やり直す
+  （model_extractor の形式を増やしたら OCR し直さずに反映）。
+- ローカル画面のステップ4「写真のタグ読み取り（無料・Mac内OCR）」（`settings.photo_ocr_enabled`、既定オン）。
+- **有料の写真AI確認（photo_reader）は既定オフ**（`settings.photo_check_enabled` 既定 False。画面の「写真AI確認（有料・Claude API）」は
+  毎回オフから始まり、前回の選択も復元しない）。オンにしたときだけ OCR でも型番が無い出品を Claude で読み、案件の傷・汚れも判定する。
+  既定の設定では Anthropic API は一切呼ばれない。
+- 傷・汚れのローカル判定（Ollama 等のローカル VLM）は未実装。入口は `ocr_reader.inspect_deals_local`（今は {} を返す）。
 
 ## 知り合いとの共有（2026-10 追加）
 - リポジトリ `takenoriosaka/rieki-hakken` は **public** で運用（招待・GitHub アカウントは不要）。個人情報や秘密情報をコミットしないこと。

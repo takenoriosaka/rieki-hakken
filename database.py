@@ -47,6 +47,16 @@ def init_db():
                 fetched_at TEXT NOT NULL
             );
 
+            -- 写真の文字を Mac 内の OCR で読んだ結果（説明文でも型番が取れなかった出品。ocr_reader）
+            -- photos_key は OCR の版＋写真URLの一覧のハッシュ。text は読めた文字の全文（'' は文字なし）
+            CREATE TABLE IF NOT EXISTS photo_ocr_cache (
+                url        TEXT PRIMARY KEY,
+                photos_key TEXT NOT NULL,
+                text       TEXT NOT NULL,
+                model      TEXT NOT NULL DEFAULT '',
+                fetched_at TEXT NOT NULL
+            );
+
             -- 生徒ごとの配信済み案件（競合防止・重複防止）
             CREATE TABLE IF NOT EXISTS student_deals (
                 student_email TEXT NOT NULL,
@@ -232,6 +242,44 @@ def cache_photo_read(url: str, texts: list[str], model: str | None, max_age_hour
         # 期限切れは掃除（DB肥大化防止）
         conn.execute(
             "DELETE FROM photo_read_cache WHERE fetched_at < ?",
+            ((now - timedelta(hours=max_age_hours)).isoformat(),),
+        )
+
+
+def get_cached_photo_ocr(pairs: list[tuple[str, str]], max_age_hours: int) -> dict[str, str]:
+    """写真の OCR 済みの全文を返す（pairs = [(url, photos_key)]。写真URLの一覧と OCR の版が同じものだけ）"""
+    if not pairs:
+        return {}
+    want = dict(pairs)
+    urls = list(want)
+    cutoff = (datetime.now() - timedelta(hours=max_age_hours)).isoformat()
+    out: dict[str, str] = {}
+    with _conn() as conn:
+        for i in range(0, len(urls), 500):
+            chunk = urls[i:i + 500]
+            marks = ",".join("?" * len(chunk))
+            rows = conn.execute(
+                f"SELECT url, photos_key, text FROM photo_ocr_cache "
+                f"WHERE url IN ({marks}) AND fetched_at > ?",
+                (*chunk, cutoff),
+            ).fetchall()
+            for url, key, text in rows:
+                if want.get(url) == key:
+                    out[url] = text
+    return out
+
+
+def cache_photo_ocr(url: str, photos_key: str, text: str, model: str | None, max_age_hours: int) -> None:
+    """写真の OCR の全文を保存する（model は採用した型番。記録用）"""
+    now = datetime.now()
+    with _conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO photo_ocr_cache (url, photos_key, text, model, fetched_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (url, photos_key, text, model or "", now.isoformat()),
+        )
+        conn.execute(
+            "DELETE FROM photo_ocr_cache WHERE fetched_at < ?",
             ((now - timedelta(hours=max_age_hours)).isoformat(),),
         )
 

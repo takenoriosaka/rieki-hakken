@@ -20,8 +20,9 @@
   API エラーのときは保存せず、次回再試行する。
 ・1回のスキャンの料金上限（settings.photo_read_max_yen_per_scan）は品番・状態の両方で共有し、超えたら
   写真の確認だけ止める（スキャンは続ける）。
-・ローカル画面の「写真をAIで確認する」のチェックを外すと、そのスキャンでは (1)(2) とも行わない
-  （settings.photo_check_enabled）。
+・有料のため既定はオフ。ローカル画面の「写真AI確認（有料・Claude API）」にチェックを入れたスキャンだけ
+  (1)(2) を行う（settings.photo_check_enabled。既定 False。config.json・画面で指定が無ければ API は一切呼ばない）。
+  型番のタグ読み取りは、先に無料の Mac 内 OCR（ocr_reader）で行い、そこで取れなかった出品だけをここで読む。
 ・API キーはログに出さない（エラー表示でも念のため伏せる）。
 """
 
@@ -55,7 +56,7 @@ DEFAULTS = {
     "photo_read_max_images": 20,               # 1出品あたりに見せる写真の上限（タグは後ろの方に多いので末尾を優先）
     "photo_read_max_edge": 1568,               # 送る前に縮小する長辺（px）。タグの小さい文字が読める大きさ
     "photo_read_usd_jpy": 155,                 # 料金の円換算レート（概算表示・上限判定用）
-    "photo_check_enabled": True,               # このスキャンで写真の確認（品番・状態）をするか（ローカル画面のチェック）
+    "photo_check_enabled": False,              # このスキャンで写真の確認（品番・状態）をするか（有料。ローカル画面のチェック。既定オフ）
     "photo_condition_check": True,             # 案件の写真で傷・汚れを確認するか
 }
 
@@ -265,7 +266,7 @@ def status_info() -> dict:
     available = ok
     if ok and _session["disabled"]:
         ok, reason = False, _session["disabled"]
-    label = "写真AI確認（型番タグ・傷汚れ）: " + ("使えます" if ok else f"無効（{reason}）")
+    label = "写真AI確認（有料・Claude API）: " + ("使えます" if ok else f"無効（{reason}）")
     return {"enabled": ok, "available": available, "label": label, "stats": dict(stats),
             "summary": summary() if ok else ""}
 
@@ -553,15 +554,28 @@ def _pick(urls: list[str], limit: int) -> list[str]:
     return urls[:1] + urls[len(urls) - (limit - 1):]
 
 
-def _download(url: str, max_edge: int) -> tuple[str, int] | None:
-    """写真をダウンロードして長辺 max_edge 以下に縮小し、(base64 の JPEG, 推定トークン数) を返す。
-    ログインなし（Cookie 等は使わない）。失敗したら None"""
+def download_bytes(url: str) -> bytes | None:
+    """写真をダウンロードしてバイト列を返す（ログインなし。Cookie 等は使わない）。失敗したら None。
+    無料の OCR（ocr_reader）でも使う"""
     import requests
-    from PIL import Image
     try:
         resp = requests.get(url, headers={"User-Agent": _USER_AGENT}, timeout=20)
         resp.raise_for_status()
-        img = Image.open(io.BytesIO(resp.content))
+        return resp.content
+    except Exception as e:
+        print(f"      [写真] 写真の取得エラー ({url}): {type(e).__name__}")
+        return None
+
+
+def _download(url: str, max_edge: int) -> tuple[str, int] | None:
+    """写真をダウンロードして長辺 max_edge 以下に縮小し、(base64 の JPEG, 推定トークン数) を返す。
+    ログインなし（Cookie 等は使わない）。失敗したら None"""
+    from PIL import Image
+    data = download_bytes(url)
+    if data is None:
+        return None
+    try:
+        img = Image.open(io.BytesIO(data))
         img = img.convert("RGB")
         img.thumbnail((max_edge, max_edge), Image.LANCZOS)   # 小さい写真はそのまま（拡大しない）
         buf = io.BytesIO()
@@ -571,7 +585,7 @@ def _download(url: str, max_edge: int) -> tuple[str, int] | None:
         tokens = min(math.ceil(w / 28) * math.ceil(h / 28), 4784)
         return base64.standard_b64encode(buf.getvalue()).decode("ascii"), tokens
     except Exception as e:
-        print(f"      [写真AI確認] 写真の取得エラー ({url}): {type(e).__name__}")
+        print(f"      [写真AI確認] 写真の読み込みエラー ({url}): {type(e).__name__}")
         return None
 
 

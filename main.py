@@ -24,6 +24,7 @@ import analyzer
 import condition_checker
 import database
 import model_extractor
+import ocr_reader
 import photo_reader
 from models import Deal
 from scrapers import yahoo_auctions
@@ -176,6 +177,7 @@ def scan(
     for k in _stats:
         _stats[k] = 0
     photo_reader.reset_session(settings)
+    ocr_reader.reset_session(settings)
     # 案件の写真で傷・汚れを確認するスキャンか（本人の Mac でキーがあり、画面でオフにしていないときだけ）
     analyzer.set_photo_check(photo_reader.condition_enabled())
     # 前回スキャンで控えた商品写真のURLを捨てる（ローカル画面を起動したまま何度スキャンしても溜まらないように）
@@ -206,6 +208,8 @@ def scan(
               f"メルカリ相場取得 {st['fetch']}回（うち0件 {st['zero']}回）/ "
               f"DBキャッシュ利用 {st['db_cache']}回 / 同一スキャン内の再利用 {st['memo']}回 / "
               f"説明文取得 {_stats['desc_fetched']}件（キャッシュ利用 {_stats['desc_cached']}件）")
+        if ocr_reader.enabled():
+            print(f"[スキャン統計] {ocr_reader.summary()}")
         if photo_reader.enabled() or photo_reader.stats["api_calls"]:
             print(f"[スキャン統計] {photo_reader.summary()}")
 
@@ -520,8 +524,24 @@ def _scan_keywords(
                     else:
                         unresolved.append(item)
 
-                # それでも型番が無い出品は、写真（品質表示タグ・内側のタグ等）に写った品番を Claude で読む。
-                # .env に API キーがある本人の Mac だけで動く（それ以外は何もしない。photo_reader 参照）。
+                # それでも型番が無い出品は、写真（品質表示タグ・内側のタグ等）の文字を Mac 内の OCR で読む（無料。
+                # ocr_reader。読めた文字は説明文と同じく model_extractor で照合する）
+                if unresolved and ocr_reader.enabled():
+                    ocr_models = ocr_reader.read_listings(
+                        unresolved, brand_name, category,
+                        lambda todo: _get_image_urls(todo, page), should_stop=should_stop)
+                    still: list = []
+                    for item in unresolved:
+                        if item.url in ocr_models:
+                            candidates.append((item, ocr_models[item.url]))
+                            remember_name(item, ocr_models[item.url], ocr_models[item.url])
+                        else:
+                            still.append(item)
+                    unresolved = still
+
+                # OCR でも型番が無い出品は、有料の写真AI確認をオンにしたときだけ Claude で写真を読む。
+                # .env に API キーがある本人の Mac で、画面で「写真AI確認（有料）」をオンにしたときだけ動く
+                # （既定はオフ。photo_reader 参照）。
                 # 読んだ文字列は model_extractor.extract() で正規の型番形式に当てはまるものだけ採用する
                 if unresolved and photo_reader.enabled():
                     photo_models = photo_reader.read_listings(

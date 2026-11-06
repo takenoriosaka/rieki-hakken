@@ -118,10 +118,15 @@
           <label class="switch-line"><input type="checkbox" id="auctionOnly"> <span>オークション形式の商品だけにする</span></label>
           <div class="hint">即決・定額・フリマ形式の商品は残り時間の条件の対象外です（上のチェックを入れると除外）</div>
         </div>
+        <div class="cond-card" id="photoOcrCard" hidden>
+          <h3>写真のタグ読み取り <small>無料・Mac内OCR</small></h3>
+          <label class="switch-line"><input type="checkbox" id="photoOcr"> <span>写真のタグ読み取り（無料・Mac内OCR）</span></label>
+          <div class="hint">タイトルにも説明文にも型番が無い出品は、出品写真の文字（品質表示タグ等）を Mac の中で読み取って型番を探します。料金はかかりません（読み取り済みの写真は再度読みません）</div>
+        </div>
         <div class="cond-card" id="photoCheckCard" hidden>
-          <h3>写真AI確認 <small>型番タグ・傷汚れ（有料のAPI）</small></h3>
-          <label class="switch-line"><input type="checkbox" id="photoCheck"> <span>出品写真をAIで確認する</span></label>
-          <div class="hint">説明文にも型番が無い出品はタグの写真から型番を読み、利益が出る商品は写真で傷・汚れを確認して、タイトルの状態より悪ければ相場を下げて計算します（1回のリサーチの料金上限 1,000円・確認済みの写真は再度読みません）</div>
+          <h3>写真AI確認 <small>有料・Claude API</small></h3>
+          <label class="switch-line"><input type="checkbox" id="photoCheck"> <span>写真AI確認（有料・Claude API）</span></label>
+          <div class="hint">料金がかかります（1件あたり約6〜10円・1回のリサーチの上限 1,000円）。チェックを入れたときだけ、無料の読み取りでも型番が無い出品のタグをAIで読み、利益が出る商品は写真で傷・汚れを確認して、タイトルの状態より悪ければ相場を下げて計算します。毎回オフから始まります</div>
         </div>
         <div class="cond-card">
           <h3>取得件数 <small>仕入れ先ごと・1キーワードあたり</small></h3>

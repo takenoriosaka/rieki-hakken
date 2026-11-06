@@ -7,3 +7,4 @@ lxml>=5.1.0
 flask>=3.0.0
 anthropic>=2.1.0
 Pillow>=10.0.0
+pyobjc-framework-Vision>=10.0; sys_platform == "darwin"

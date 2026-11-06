@@ -37,6 +37,7 @@ from flask import Flask, jsonify, request, send_from_directory  # noqa: E402
 import database          # noqa: E402
 import main as scan_main  # noqa: E402
 import model_extractor   # noqa: E402
+import ocr_reader        # noqa: E402
 import photo_reader      # noqa: E402
 
 HOST = "127.0.0.1"
@@ -234,10 +235,13 @@ def build_options() -> dict:
             "min_roi": 0,
             "per_source": 20,
             "config_per_source": settings.get("search_items_per_source", 80),
-            # 写真AI確認（型番タグ・傷汚れ）のチェックの既定（この Mac で使えるときだけオン）
-            "photo_check": photo_reader.status()[0],
+            # 写真AI確認（有料・Claude API。型番タグ・傷汚れ）のチェックの既定は常にオフ（料金がかかるため）
+            "photo_check": False,
+            # 写真のタグ読み取り（無料・Mac内OCR）のチェックの既定（この Mac で使えるときはオン）
+            "photo_ocr": ocr_reader.available(),
         },
         "photo_check_available": photo_reader.status()[0],
+        "photo_ocr_available": ocr_reader.available(),
     }
 
 
@@ -461,6 +465,8 @@ class _Job:
                 "error": self.error,
                 # 写真から型番を読む機能の有効/無効とスキャン統計（.env の API キー等で判定。キーの中身は含まない）
                 "photo_read": photo_reader.status_info(),
+                # 写真のタグ読み取り（無料・Mac内OCR）の有効/無効とスキャン統計
+                "photo_ocr": ocr_reader.status_info(),
             }
             if with_results:
                 out["results"] = self.results
@@ -516,8 +522,10 @@ def _run_job(req: dict):
         hours = float(hours) if hours not in (None, "", "0", 0) else None
         auction_only = bool(req.get("auction_only"))
         sources = set(req.get("sources") or [])
-        # 写真AI確認（型番タグ・傷汚れ）: 画面のチェック。古い画面から送られて項目が無いときはオン
-        settings["photo_check_enabled"] = req.get("photo_check", True) is not False
+        # 写真AI確認（有料・Claude API）: 画面でチェックを入れたときだけ（項目が無い・古い画面からはオフ）
+        settings["photo_check_enabled"] = req.get("photo_check") is True
+        # 写真のタグ読み取り（無料・Mac内OCR）: 画面のチェック。項目が無いときはオン
+        settings["photo_ocr_enabled"] = req.get("photo_ocr", True) is not False
 
         plan = build_plan(req, cfg)
         with JOB.lock:

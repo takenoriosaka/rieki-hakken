@@ -21,7 +21,7 @@ const state = {
   model_numbers: new Set(),  // "ブランド|型番"
   sources: new Set(),
 };
-const cond = { min_profit: 3000, min_roi: 0, auction_hours: '', auction_only: false, per_source: 20, free_numbers: '', photo_check: true };
+const cond = { min_profit: 3000, min_roi: 0, auction_hours: '', auction_only: false, per_source: 20, free_numbers: '', photo_check: false, photo_ocr: true };
 
 let currentStep = 1;
 let RESULTS = [];
@@ -296,7 +296,10 @@ function renderStep4() {
   $('hoursSeg').innerHTML = HOUR_OPTIONS.map(([v, l]) =>
     `<button type="button" class="${String(cond.auction_hours) === v ? 'on' : ''}" data-hours="${v}">${l}${v ? '以内' : ''}</button>`).join('');
   $('auctionOnly').checked = !!cond.auction_only;
-  // 写真AI確認のチェック（この Mac で API キーが使えるときだけ表示）
+  // 写真のタグ読み取り（無料・Mac内OCR）のチェック（この Mac で使えるときだけ表示）
+  $('photoOcrCard').hidden = !OPTIONS.photo_ocr_available;
+  $('photoOcr').checked = !!cond.photo_ocr;
+  // 写真AI確認（有料・Claude API）のチェック（この Mac で API キーが使えるときだけ表示。既定オフ）
   $('photoCheckCard').hidden = !OPTIONS.photo_check_available;
   $('photoCheck').checked = !!cond.photo_check;
   $('perSourceSeg').innerHTML = PER_SOURCE_PRESETS.map(([v, l]) =>
@@ -370,7 +373,8 @@ function renderFinal() {
     ['残り時間', (hours && hours[0] ? hours[1] + '以内' : '指定なし') + (cond.auction_only ? '・オークションのみ' : '')],
     ['取得件数', `${preset ? preset[1] : ''} ${cond.per_source}件`],
   ];
-  if (OPTIONS.photo_check_available) rows.push(['写真AI確認', cond.photo_check ? 'する（型番タグ・傷汚れ）' : 'しない']);
+  if (OPTIONS.photo_ocr_available) rows.push(['写真のタグ読み取り', cond.photo_ocr ? 'する（無料・Mac内OCR）' : 'しない']);
+  if (OPTIONS.photo_check_available) rows.push(['写真AI確認（有料）', cond.photo_check ? 'する（Claude API・型番タグ・傷汚れ）' : 'しない（料金なし）']);
   $('finalSummary').innerHTML = rows.map(([k, v]) =>
     `<div class="fs-row"><dt>${k}</dt><dd class="${v ? '' : 'missing'}">${esc(v || '未選択')}</dd></div>`).join('');
   const e = estimateMinutes(Number(cond.per_source));
@@ -437,6 +441,7 @@ document.addEventListener('input', e => {
 document.addEventListener('change', e => {
   if (e.target.id === 'auctionOnly') { cond.auction_only = e.target.checked; saveState(); renderFinal(); }
   if (e.target.id === 'photoCheck') { cond.photo_check = e.target.checked; saveState(); renderFinal(); }
+  if (e.target.id === 'photoOcr') { cond.photo_ocr = e.target.checked; saveState(); renderFinal(); }
   if (e.target.id === 'minProfit' || e.target.id === 'minRoi') { syncNumber(e.target.id, e.target.id === 'minProfit' ? cond.min_profit : cond.min_roi); e.target.value = e.target.id === 'minProfit' ? cond.min_profit : cond.min_roi; }
 });
 
@@ -468,6 +473,7 @@ function collectConditions() {
     per_source: String(cond.per_source),
     sources: [...state.sources],
     photo_check: !!(OPTIONS.photo_check_available && cond.photo_check),
+    photo_ocr: !!(OPTIONS.photo_ocr_available && cond.photo_ocr),
   };
 }
 
@@ -526,8 +532,10 @@ function restoreState() {
   cond.auction_hours = snapHours(saved?.auction_hours);
   cond.auction_only = !!saved?.auction_only;
   cond.per_source = snapPerSource(saved?.per_source ?? d.per_source);
-  // 写真AI確認: 前回オフにしていればオフのまま。保存が無い（初回・この項目の追加前）なら既定（キーがあればオン）
-  cond.photo_check = typeof saved?.photo_check === 'boolean' && OPTIONS.photo_check_available ? saved.photo_check : !!d.photo_check;
+  // 写真AI確認（有料）: 料金がかかるため前回の選択は復元せず、毎回オフから始める（使うときだけチェックを入れる）
+  cond.photo_check = !!d.photo_check;
+  // 写真のタグ読み取り（無料）: 前回オフにしていればオフのまま。保存が無ければ既定（使える Mac ならオン）
+  cond.photo_ocr = typeof saved?.photo_ocr === 'boolean' && OPTIONS.photo_ocr_available ? saved.photo_ocr : !!d.photo_ocr;
 }
 
 // ── リサーチ実行 ──────────────────────────────────────────
@@ -663,7 +671,7 @@ function showProgress(s) {
     $('progressNote').textContent = '';
   }
   updateTimes(s);
-  renderPhotoRead(s.photo_read);
+  renderPhotoRead(s.photo_read, s.photo_ocr);
   const box = $('logBox');
   const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 10;
   box.textContent = (s.logs || []).join('\n');
@@ -863,17 +871,22 @@ function photoConditionHtml(d) {
 
 // ── 初期化 ───────────────────────────────────────────────
 // 写真から型番を読む機能の有効/無効（ヘッダーに小さく）と、スキャン中・後の読み取り件数・概算料金（調査中の画面）
-function renderPhotoRead(p) {
-  if (!p) return;
+function renderPhotoRead(p, o) {
+  if (!p && !o) return;
   $('photoStatus').hidden = false;
-  $('photoStatus').textContent = p.label;
-  const st = p.stats || {};
-  const show = p.enabled && (st.targets || st.inspect_targets || st.api_calls);
-  $('photoStats').hidden = !show;
-  if (show) {
-    $('photoStats').textContent = `📷 写真AI確認：型番 採用 ${num(st.adopted)}件 / 対象 ${num(st.targets)}件・傷汚れ 判定 ${num(st.inspected)}件（状態を下げて残した ${num(st.downgraded)}件・利益不足で除外 ${num(st.dropped)}件）・API ${num(st.api_calls)}回・概算 ${num(Math.round(st.cost_yen || 0))}円`
-      + (st.stopped ? '（料金上限で停止）' : '');
+  $('photoStatus').textContent = [o && o.label, p && p.label].filter(Boolean).join(' / ');
+  const lines = [];
+  const ost = (o && o.stats) || {};
+  if (o && o.available && ost.targets) {
+    lines.push(`🔎 写真のタグ読み取り（無料）：型番 採用 ${num(ost.adopted)}件 / 対象 ${num(ost.targets)}件（キャッシュ ${num(ost.cached)}件）・写真 ${num(ost.images)}枚`);
   }
+  const st = (p && p.stats) || {};
+  if (p && p.enabled && (st.targets || st.inspect_targets || st.api_calls)) {
+    lines.push(`📷 写真AI確認（有料）：型番 採用 ${num(st.adopted)}件 / 対象 ${num(st.targets)}件・傷汚れ 判定 ${num(st.inspected)}件（状態を下げて残した ${num(st.downgraded)}件・利益不足で除外 ${num(st.dropped)}件）・API ${num(st.api_calls)}回・概算 ${num(Math.round(st.cost_yen || 0))}円`
+      + (st.stopped ? '（料金上限で停止）' : ''));
+  }
+  $('photoStats').hidden = !lines.length;
+  if (lines.length) $('photoStats').textContent = lines.join('　');
 }
 
 async function init() {
@@ -889,7 +902,7 @@ async function init() {
   let s = null;
   try { s = await (await fetch('/api/status?results=1')).json(); } catch (e) { s = null; }
   if (!s) return;
-  renderPhotoRead(s.photo_read);
+  renderPhotoRead(s.photo_read, s.photo_ocr);
   LAST = s;
   if (s.state === 'running') {
     showProgress(s);
