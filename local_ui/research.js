@@ -2,6 +2,7 @@
 // 画面構成: 条件選択（4ステップ） → 調査中 → 結果
 
 const STORAGE_KEY = 'rieki-research-conditions-v1';   // 保存形式は従来のまま（前回の選択をそのまま復元）
+const PHOTO_LOCAL_DEFAULT_VERSION = 2;   // 「写真で傷・汚れ確認（無料・Mac内AI）」を既定オンにした版（古い保存値の移行用）
 const SOURCE_LABELS = { yahoo_auctions: 'ヤフオク', mercari_cheap: 'メルカリ安値', sekaist: 'セカスト', vector_park: 'ベクトルパーク', trefac: 'トレファク', rakuma: 'ラクマ', yahoo_flea: 'Yahoo!フリマ' };
 const SOURCE_ICONS = { yahoo_auctions: '🔨', mercari_cheap: '🛍️', sekaist: '👕', vector_park: '💼', trefac: '♻️', rakuma: '📦', yahoo_flea: '🏪' };
 const SOURCE_DESC = { yahoo_auctions: '入札形式・即決の両方', mercari_cheap: 'メルカリの安い出品', sekaist: '', vector_park: 'ブランド買取店の販売', trefac: 'リユース店の通販', rakuma: 'フリマアプリ', yahoo_flea: 'フリマアプリ' };
@@ -21,7 +22,7 @@ const state = {
   model_numbers: new Set(),  // "ブランド|型番"
   sources: new Set(),
 };
-const cond = { min_profit: 3000, min_roi: 0, auction_hours: '', auction_only: false, per_source: 20, free_numbers: '', photo_check: false, photo_ocr: true, photo_local: false };
+const cond = { min_profit: 3000, min_roi: 0, auction_hours: '', auction_only: false, per_source: 20, free_numbers: '', photo_check: false, photo_ocr: true, photo_local: true };
 
 let currentStep = 1;
 let RESULTS = [];
@@ -492,6 +493,10 @@ function saveState() {
     c.brands = [...state.brands];   // 非表示中のブランド選択も覚えておく
     c.models = [...state.models];
     c.model_numbers = [...state.model_numbers];
+    // 写真で傷・汚れ確認（無料・Mac内AI）: 一時的に Ollama が使えないときでも選択そのものを覚えておく。
+    // photo_local_v は「既定オンになった後の保存」の印（これが無い古い保存値は既定オンに移行する）
+    c.photo_local = !!cond.photo_local;
+    c.photo_local_v = PHOTO_LOCAL_DEFAULT_VERSION;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(c));
   } catch (e) { /* 保存できなくても動作には影響なし */ }
 }
@@ -545,8 +550,10 @@ function restoreState() {
   cond.photo_check = !!d.photo_check;
   // 写真のタグ読み取り（無料）: 前回オフにしていればオフのまま。保存が無ければ既定（使える Mac ならオン）
   cond.photo_ocr = typeof saved?.photo_ocr === 'boolean' && OPTIONS.photo_ocr_available ? saved.photo_ocr : !!d.photo_ocr;
-  // 写真で傷・汚れ確認（無料・Mac内AI）: 前回の選択を復元（保存が無ければ既定のオフ）
-  cond.photo_local = typeof saved?.photo_local === 'boolean' ? saved.photo_local : !!d.photo_local;
+  // 写真で傷・汚れ確認（無料・Mac内AI）: 既定オンになった後に保存した選択だけ復元する。
+  // それより前の保存値（既定オフ時代に自動で保存された false）は一度だけ既定（オン）に移行する
+  const localSaved = saved && saved.photo_local_v === PHOTO_LOCAL_DEFAULT_VERSION && typeof saved.photo_local === 'boolean';
+  cond.photo_local = localSaved ? saved.photo_local : !!d.photo_local;
 }
 
 // ── リサーチ実行 ──────────────────────────────────────────
@@ -822,6 +829,7 @@ function renderResults() {
     }
     const searchText = [d.brand, d.model].filter(Boolean).join(' ') || d.keyword;
     const searchTextAttr = esc(JSON.stringify(searchText));
+    const urlAttr = esc(JSON.stringify(d.url || ''));
     const mercariSearchUrl = `https://jp.mercari.com/search?keyword=${encodeURIComponent(searchText)}&status=sold_out&sort=created_time&order=desc&item_types=1`;
     return `
     <article class="card">
@@ -853,6 +861,7 @@ function renderResults() {
         <div class="card-actions">
           <button type="button" class="btn-sub" onclick="copyDealText(this, ${searchTextAttr})">📋 コピー</button>
           <a class="btn-sub btn-mercari" href="${esc(mercariSearchUrl)}" target="_blank" rel="noopener noreferrer">メルカリ相場を見る</a>
+          <button type="button" class="btn-sub btn-url" title="出品URLをコピー（Claude Code に貼って写真を確認してもらう用）" onclick="copyDealText(this, ${urlAttr})">🔗 URLをコピー</button>
         </div>
         <a class="card-btn" href="${esc(d.url)}" target="_blank" rel="noopener">商品を見る →</a>
       </div>

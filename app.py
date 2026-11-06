@@ -240,8 +240,9 @@ def build_options() -> dict:
             "photo_check": False,
             # 写真のタグ読み取り（無料・Mac内OCR）のチェックの既定（この Mac で使えるときはオン）
             "photo_ocr": ocr_reader.available(),
-            # 写真で傷・汚れ確認（無料・Mac内AI = Ollama）のチェックの既定（精度を確かめるまでオフ）
-            "photo_local": False,
+            # 写真で傷・汚れ確認（無料・Mac内AI = Ollama）のチェックの既定はオン（普段使い。Ollama が使える Mac だけ有効。
+            # 気になる商品だけ「URLをコピー」して Claude Code で個別に確認する運用）
+            "photo_local": True,
         },
         "photo_check_available": photo_reader.status()[0],
         "photo_ocr_available": ocr_reader.available(),
@@ -542,7 +543,7 @@ def _run_job(req: dict):
         settings["photo_check_enabled"] = req.get("photo_check") is True
         # 写真のタグ読み取り（無料・Mac内OCR）: 画面のチェック。項目が無いときはオン
         settings["photo_ocr_enabled"] = req.get("photo_ocr", True) is not False
-        # 写真で傷・汚れ確認（無料・Mac内AI）: 画面でチェックを入れたときだけ（既定オフ）
+        # 写真で傷・汚れ確認（無料・Mac内AI）: 画面のチェック（画面の既定はオン。項目が無い古い画面からはオフ）
         settings["photo_local_check_enabled"] = req.get("photo_local") is True
 
         plan = build_plan(req, cfg)
