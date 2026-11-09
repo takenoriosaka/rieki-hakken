@@ -84,8 +84,8 @@ SOURCE_LABELS = {
 #   ヤフオク: 9モデルとも英字の検索でだけ出る出品0件（カタカナの検索で英字タイトルの出品も出る）→ 使わない
 #   メルカリ安値（MONCLER MAYA +22件 等）・ベクトルパーク（カナダグース +58件 等）・Yahoo!フリマ（ノースフェイス +19件）・
 #   Yahoo!ショッピング（TATRAS LAVIANA +10件 等）・ラクマ（TATRAS POLICORO 等 +9件）→ 使う
-#   トレファク: +1件だけ（「THE NORTH FACEザ ノース フェイス」表記）。はっきりしないため取りこぼし防止で使う
-EN_BRAND_SOURCES = ["mercari_cheap", "vector_park", "trefac", "rakuma", "yahoo_flea", "yahoo_shopping"]
+#   トレファク: +1件だけ（「THE NORTH FACEザ ノース フェイス」表記）。時間を減らすため使わない（2026-11-09 ユーザー決定）
+EN_BRAND_SOURCES = ["mercari_cheap", "vector_park", "rakuma", "yahoo_flea", "yahoo_shopping"]
 
 
 def run(dry_run: bool = False):
