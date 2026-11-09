@@ -204,6 +204,11 @@ step_shortcut() {
 exec "$APP_DIR/start.command"
 EOF
     chmod +x "$f" || fail "デスクトップにファイルを作れませんでした。" "このセットアップファイルをもう一度開いてください。"
+    # アイコンを付ける（失敗しても続行。見た目だけの処理）
+    if [ -f "$APP_DIR/assets/icon.icns" ]; then
+        osascript -l JavaScript -e 'ObjC.import("AppKit"); function run(a){ var i=$.NSImage.alloc.initWithContentsOfFile(a[0]); if(!i.isNil()) $.NSWorkspace.sharedWorkspace.setIconForFileOptions(i, a[1], 0); }' \
+            "$APP_DIR/assets/icon.icns" "$f" >/dev/null 2>&1 || true
+    fi
     ok "デスクトップに「$SHORTCUT_NAME.command」を作りました。次回からはこれをダブルクリックします"
 }
 
