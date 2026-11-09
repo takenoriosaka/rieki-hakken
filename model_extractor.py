@@ -3573,6 +3573,10 @@ _TITLE_NG_SRC: dict[tuple[str, str], list[str]] = {
         r'|レンズのみ|レンズ単品|レンズ交換用|高品質',
         r'(?<!レンズ)交換(?!\s*(?:用\s*)?レンズ\s*付|\s*可)',
         _like_re("オークリー"),
+        # 交換レンズ・パーツの業者の定型タイトル（「高評価 サングラス レーダーEV アジアンフィット 赤ミラー 偏光 オークリー ¥2,580」）。
+        # 2026-11-09 メルカリ売り切れ394件で「即発送/高評価」とレンズの語の両方があるタイトル25件はすべて社外レンズ（本体0件）
+        r'^(?=.*(?:即発送|高評価))(?=.*(?:偏光|ミラー|レンズ|調光))',
+        r'ラバーキット|イヤーソック|ノーズパッド|ノーズピース',     # 交換パーツ
     ],
     ("リックオウエンス", "サングラス"): [
         _like_re("リックオウエンス", ("リック", "RICK", "オウエンス", "OWENS")),
@@ -3580,6 +3584,34 @@ _TITLE_NG_SRC: dict[tuple[str, str], list[str]] = {
     ],
 }
 _TITLE_NG: dict[tuple[str, str], list] = {}
+
+
+# 説明文で外す出品（タイトルに手がかりの無い社外レンズ。main.py が型番・モデル名の取れた候補の説明文を確認する）。
+# 2026-11-09 メルカリ売り切れ（¥6,000未満・説明文70件）で、本体だけの出品の誤判定0件。社外レンズに交換済み・社外レンズ付きの
+# 本体（2件）も外れる
+_DESC_NG_SRC: dict[tuple[str, str], list[str]] = {
+    ("オークリー", "サングラス"): [
+        r'社外(?:品)?(?:の)?\s*(?:偏光|調光)?\s*(?:交換)?レンズ|互換(?:品|レンズ)|レンズ(?:のみ|だけ|単品|単体)の(?:販売|出品)'
+        r'|専用レンズ|対応(?:交換)?レンズ|UV\s*400|装着可能|には装着(?:でき|不可)',
+    ],
+}
+_DESC_NG: dict[tuple[str, str], list] = {}
+
+
+def has_description_rule(brand: str, category: str = "") -> bool:
+    return (brand, category) in _DESC_NG_SRC
+
+
+def description_excluded(text: str, brand: str, category: str = "") -> bool:
+    """説明文から仕入れ候補を外すか（上の _DESC_NG_SRC）。対象外のブランド・ジャンルは常に False"""
+    src = _DESC_NG_SRC.get((brand, category))
+    if not src or not text:
+        return False
+    pats = _DESC_NG.get((brand, category))
+    if pats is None:
+        pats = _DESC_NG[(brand, category)] = [re.compile(p, re.IGNORECASE) for p in src]
+    t = unicodedata.normalize("NFKC", text)
+    return any(p.search(t) for p in pats)
 
 
 def has_title_rule(brand: str, category: str = "") -> bool:

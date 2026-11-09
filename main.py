@@ -238,6 +238,37 @@ def scan(
             print(f"[スキャン統計] {local_inspector.summary()}")
 
 
+def fetch_descriptions(items: list, page, should_stop=None) -> dict[str, str]:
+    """出品の説明文 {url: 説明文}（DB の DESCRIPTION_CACHE_HOURS キャッシュ → メルカリは Playwright でまとめて →
+    他は DESCRIPTION_FETCHERS で取得間隔を空けて1件ずつ）。取得できなかった出品は含めない"""
+    targets = [it for it in items if it.source == "mercari_cheap" or it.source in DESCRIPTION_FETCHERS]
+    descs = database.get_cached_descriptions([it.url for it in targets], max_age_hours=DESCRIPTION_CACHE_HOURS)
+    _stats["desc_cached"] += len(descs)
+    fetched: dict[str, str] = {}
+    murls = [it.url for it in targets if it.source == "mercari_cheap" and it.url not in descs]
+    if murls:
+        fetched.update(mercari_scraper.get_descriptions(page, murls))
+        _stats["desc_fetched"] += len(murls)
+    last: dict[str, float] = {}
+    for it in targets:
+        if should_stop and should_stop():
+            break
+        if it.source not in DESCRIPTION_FETCHERS or it.url in descs or it.url in fetched:
+            continue
+        fn, interval = DESCRIPTION_FETCHERS[it.source]
+        wait = last.get(it.source, 0) + interval - time.time()
+        if wait > 0:
+            time.sleep(wait)
+        d = fn(it.url)
+        last[it.source] = time.time()
+        _stats["desc_fetched"] += 1
+        if d is not None:
+            fetched[it.url] = d
+    database.cache_descriptions(fetched)
+    descs.update(fetched)
+    return descs
+
+
 def source_fetchers(page, settings: dict, max_buy: int, min_buy: int, per_source: int,
                     exclude_words: list, immediate_only: bool = False) -> list[tuple]:
     """仕入れ先ごとの検索関数の一覧 [(仕入れ先キー, 検索語 → Item の一覧)]（SOURCE_LABELS の順）。
@@ -638,6 +669,17 @@ def _scan_keywords(
                             candidates.append((item, photo_models[item.url]))
                             # 写真の品番の相場が無ければ、品番から引いたモデル名で取り直す（モンクレールの品番表）
                             remember_name(item, photo_models[item.url], photo_models[item.url])
+
+            # 説明文で外す出品（model_extractor.description_excluded。オークリーのサングラス: タイトルに手がかりの無い社外レンズ
+            # 「高評価 … レーダーEV 偏光」等）。タイトルで型番・モデル名が取れた候補も説明文を取って確認する（7日キャッシュあり）
+            if candidates and model_extractor.has_description_rule(brand_name, category) \
+                    and not (should_stop and should_stop()):
+                cand_items = list({it.url: it for it, _m in candidates}.values())
+                descs = fetch_descriptions(cand_items, page, should_stop)
+                ng_urls = {u for u, d in descs.items() if model_extractor.description_excluded(d, brand_name, category)}
+                if ng_urls:
+                    candidates = [(it, m) for it, m in candidates if it.url not in ng_urls]
+                    print(f"    説明文で除外 {len(ng_urls)}件（社外レンズ・互換品など）")
 
             # 写真のタグの品番を優先するキーワード（config の prefer_photo_model。カナダグース）: タイトル・説明文で型番・モデル名が
             # 取れた出品も写真を OCR し、タグの品番が取れたらそれで相場を取る（タイトルの「ウィンダム」とタグの 3426M＝シャトーが
