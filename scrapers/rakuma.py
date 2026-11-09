@@ -61,6 +61,9 @@ def get_cheap_listings(
             if page > 1:
                 params["page"] = page
             resp = requests.get(_SEARCH_URL, params=params, headers=_HEADERS, timeout=15)
+            if resp.status_code == 404 and page > 1:
+                # 最後のページの次は 404 になる（2026-11 確認）。取得済みのページの出品は捨てずに返す
+                break
             resp.raise_for_status()
 
             page_items = _parse_page(resp.text, min_price, max_price, ex_lower)
