@@ -72,6 +72,8 @@ header p { font-size: 12px; opacity: .85; }
 .btn-secondary:hover { background: #ececec; }
 .btn-mercari { background: #fce4ec; color: #c62828; border-color: #f8bbd0; }
 .btn-mercari:hover { background: #fbd5e0; }
+.btn-kind { background: #ede7f6; color: #4527a0; border-color: #d1c4e9; }
+.btn-kind:hover { background: #e1d8f1; }
 
 /* empty */
 .empty { text-align: center; color: #bbb; padding: 60px 0; font-size: 14px; }

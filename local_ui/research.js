@@ -988,6 +988,7 @@ function renderResults() {
     const searchTextAttr = esc(JSON.stringify(searchText));
     const urlAttr = esc(JSON.stringify(d.url || ''));
     const mercariSearchUrl = `https://jp.mercari.com/search?keyword=${encodeURIComponent(searchText)}&status=sold_out&sort=created_time&order=desc&item_types=1`;
+    const kindSearchUrl = `https://shop.kind.co.jp/search?q=${encodeURIComponent(searchText)}`;  // 手動で開くだけ（ツールからは取得しない）
     return `
     <article class="card">
       <a class="card-media" href="${esc(d.url)}" target="_blank" rel="noopener">
@@ -1021,6 +1022,7 @@ function renderResults() {
         <div class="card-actions">
           <button type="button" class="btn-sub" onclick="copyDealText(this, ${searchTextAttr})">📋 コピー</button>
           <a class="btn-sub btn-mercari" href="${esc(mercariSearchUrl)}" target="_blank" rel="noopener noreferrer">メルカリ相場を見る</a>
+          <a class="btn-sub btn-kind" href="${esc(kindSearchUrl)}" target="_blank" rel="noopener noreferrer">KINDで見る</a>
           <button type="button" class="btn-sub btn-url" title="出品URLをコピー（Claude Code に貼って写真を確認してもらう用）" onclick="copyDealText(this, ${urlAttr})">🔗 URLをコピー</button>
         </div>
         <a class="card-btn" href="${esc(d.url)}" target="_blank" rel="noopener">商品を見る →</a>

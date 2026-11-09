@@ -167,6 +167,7 @@ function render() {
     const searchText = [d.brand, d.model].filter(Boolean).join(' ');
     const searchTextAttr = JSON.stringify(searchText).replace(/"/g, '&quot;');
     const mercariSearchUrl = `https://jp.mercari.com/search?keyword=${encodeURIComponent(searchText)}&status=sold_out&sort=created_time&order=desc&item_types=1`;
+    const kindSearchUrl = `https://shop.kind.co.jp/search?q=${encodeURIComponent(searchText)}`;  // 手動で開くだけ（ツールからは取得しない）
     return `
     <div class="card">
       ${img}
@@ -184,6 +185,7 @@ function render() {
         <div class="card-actions-secondary">
           <button type="button" class="btn-secondary btn-copy" onclick="copyDealText(this, ${searchTextAttr})">📋 コピー</button>
           <a class="btn-secondary btn-mercari" href="${mercariSearchUrl}" target="_blank" rel="noopener noreferrer">メルカリ相場を見る</a>
+          <a class="btn-secondary btn-kind" href="${kindSearchUrl}" target="_blank" rel="noopener noreferrer">KINDで見る</a>
         </div>
         <a class="card-btn" href="${d.url}" target="_blank" rel="noopener">商品を見る →</a>
       </div>
