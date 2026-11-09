@@ -786,9 +786,11 @@ def _scan_keywords(
                     deal.model = model
                     deal.category = category
                     deal.search_keyword = keyword
-                    if item.url in photo_switch:
-                        # 写真のタグの品番に切り替えた出品（結果カードに「写真の型番: 3426M（タイトル: ウィンダム）」）
-                        deal.photo_model = dict(photo_switch[item.url], used=model)
+                    sw = photo_switch.get(item.url)
+                    if sw and (sw["photo_name"] or model == sw["photo"]):
+                        # 写真のタグの品番に切り替えた出品（結果カードに「写真の型番: 3426M（タイトル: ウィンダム）」）。
+                        # 品番からモデル名が引けず、相場も元のモデル名で出したとき（結果が変わらない）は表示しない
+                        deal.photo_model = dict(sw, used=model)
                     model_deals.append(deal)
                     if live:
                         live.deal(deal)   # ローカル画面にすぐ出す（結果には影響しない）

@@ -912,8 +912,9 @@ def _scan_pair(page, brand: str, genre: dict, p: dict, settings: dict, sources, 
         deal.search_keyword = f"{brand} {genre['label']}"
         feats = detect_item_features(it.title, inf["desc"])
         deal.free_info = _build_info(gm, inf, feats, model_basis, p)
-        if inf.get("photo_model") and model_market is not None:
-            deal.photo_model = dict(inf["photo_model"], used=inf["model"])
+        pm = inf.get("photo_model")
+        if pm and model_market is not None and (pm["photo_name"] or inf["model"] == pm["photo"]):
+            deal.photo_model = dict(pm, used=inf["model"])   # 結果が変わらない切り替え（品番のモデル名不明・元のモデル名で相場）は表示しない
         deals.append(deal)
         if live:
             live.deal(deal)   # ローカル画面にすぐ出す（結果には影響しない）

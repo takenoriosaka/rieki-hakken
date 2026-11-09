@@ -294,6 +294,7 @@
         "DOWN"
       ],
       "require_model_number": true,
+      "prefer_photo_model": true,
       "search_all_models": true,
       "brand_name": "モンクレール",
       "en_brand_name": "MONCLER",
