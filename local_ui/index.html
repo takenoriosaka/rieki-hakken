@@ -285,6 +285,10 @@
         <div class="stat"><div class="stat-label">残りの目安</div><div class="stat-value" id="remainText">計算中…</div></div>
         <div class="stat stat-found"><div class="stat-label">見つかった候補</div><div class="stat-value" id="foundText">0件</div></div>
       </div>
+      <div class="live-jump" id="liveJump" hidden>
+        <button type="button" class="primary-btn" id="liveJumpBtn" onclick="showResultsView()">見つかった案件を今すぐ見る</button>
+        <div class="hint center">リサーチは裏で続きます。新しく見つかった案件は結果の画面に追加されます。</div>
+      </div>
       <div class="hint center photo-stats" id="photoStats" hidden></div>
       <div class="hint center" id="progressNote">候補の数は途中経過です。最後に条件（モデル・利益率・重複）で絞り込んだ件数が結果になります。</div>
       <div class="progress-actions" id="progressActions" hidden>
@@ -310,6 +314,16 @@
         <button type="button" class="primary-btn" onclick="backToConditions()">条件を変えて再検索</button>
         <button type="button" class="ghost-btn" onclick="goStep(1, true)">最初から選び直す</button>
       </div>
+    </div>
+
+    <div class="live-banner" id="liveBanner" hidden>
+      <div class="live-line">
+        <span class="live-dot" aria-hidden="true"></span>
+        <span id="liveText">リサーチ中…</span>
+        <button type="button" class="link-btn" onclick="showView('progress')">進み具合を見る →</button>
+      </div>
+      <div class="live-sub" id="liveSub"></div>
+      <button type="button" class="live-new" id="liveNewBtn" onclick="applyPending()" hidden></button>
     </div>
 
     <div class="summary-tiles" id="summaryTiles"></div>

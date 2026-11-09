@@ -446,3 +446,17 @@ a.tile-best:hover { box-shadow: var(--shadow-hover); }
 .fi-feats small { margin: 0 4px; font-size: 11px; }
 .fi-tag { display: inline-block; background: var(--purple-bg); color: var(--purple-text); border-radius: 6px; padding: 0 7px; font-weight: 700; font-size: 12px; }
 .fi-note { color: var(--muted); font-size: 12px; }
+
+/* ── 実行中の途中経過（見つかった案件をすぐ表示） ─────────────── */
+.live-jump { text-align: center; margin: 14px 0 4px; }
+.live-banner { position: sticky; top: 8px; z-index: 5; background: var(--surface); border: 1px solid var(--accent); border-radius: 12px; padding: 10px 16px; margin-bottom: 16px; box-shadow: var(--shadow); font-size: 14px; }
+.live-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.live-line #liveText { font-weight: 600; }
+.live-line .link-btn { margin-left: auto; }
+.live-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex: none; animation: livePulse 1.4s ease-in-out infinite; }
+@keyframes livePulse { 0%, 100% { opacity: 1; } 50% { opacity: .3; } }
+.live-sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+.live-new { display: block; width: 100%; margin-top: 8px; padding: 8px 12px; border: none; border-radius: 8px; background: var(--accent); color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; }
+.live-new:hover { background: var(--accent-hover); }
+.badge.b-pending { background: var(--accent-soft); color: var(--accent-text); }
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }

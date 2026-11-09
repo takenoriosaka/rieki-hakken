@@ -38,6 +38,7 @@ import database          # noqa: E402
 import free_research     # noqa: E402
 import main as scan_main  # noqa: E402
 import model_extractor   # noqa: E402
+import analyzer          # noqa: E402
 import local_inspector   # noqa: E402
 import ocr_reader        # noqa: E402
 import photo_reader      # noqa: E402
@@ -455,6 +456,96 @@ def _deal_to_dict(d) -> dict:
     }
 
 
+def _best_rows(deals, keep=None) -> list[dict]:
+    """案件の一覧 → 画面の結果（keep で絞り込み、同じ出品URLは見込み利益の大きい1件、利益の大きい順）"""
+    best: dict[str, object] = {}
+    for d in deals:
+        if keep is not None and not keep(d):
+            continue
+        prev = best.get(d.item.url)
+        if prev is None or d.estimated_profit > prev.estimated_profit:
+            best[d.item.url] = d
+    return sorted((_deal_to_dict(d) for d in best.values()),
+                  key=lambda r: r["estimated_profit"], reverse=True)
+
+
+class _LiveResults:
+    """リサーチ実行中の途中経過（main.scan / free_research.scan の live）。スキャンのスレッドから呼ばれる。
+    見つかった案件を写真確認の前でもすぐ画面に出す。画面に出す一覧は、最後の結果と同じ絞り込み・重複のまとめ
+    （finalize）を、その時点までに見つかった案件にかけたもの。最後の結果（JOB.results・last_result.json）は
+    従来どおりスキャンの戻り値から作り、この途中経過は使わない"""
+
+    def __init__(self, finalize):
+        self.lock = threading.Lock()
+        self.finalize = finalize   # list[Deal] → list[dict]
+        self.raw: list = []        # 見つかった順の案件（写真確認の前）
+        self.updated: dict[int, object] = {}   # raw の位置 → 写真確認で計算し直した案件（None = 利益不足で除外）
+        self.photo_phase = False   # 写真で傷・汚れの確認を始めたか
+        self.photo_total = 0       # 写真を確認する出品の数
+        self.version = 0
+        self._built = (-1, [], {})
+
+    def deal(self, d):
+        with self.lock:
+            self.raw.append(d)
+            self.version += 1
+
+    def photo_start(self, n: int):
+        with self.lock:
+            self.photo_phase = True
+            self.photo_total = n
+            self.version += 1
+
+    def photo(self, url: str, recalc):
+        with self.lock:
+            for i, d in enumerate(self.raw):
+                if d.item.url == url:
+                    self.updated[i] = recalc(d)
+            self.version += 1
+
+    def build(self) -> tuple[list[dict], dict]:
+        """(画面に出す一覧, 途中経過の情報)。版が変わったときだけ作り直す"""
+        with self.lock:
+            if self._built[0] == self.version:
+                return self._built[1], self._built[2]
+            version = self.version
+            current, checked, dropped = [], set(), set()
+            for i, d in enumerate(self.raw):
+                if i in self.updated:
+                    nd = self.updated[i]
+                    checked.add(d.item.url)
+                    if nd is None:
+                        dropped.add(d.item.url)
+                        continue
+                    current.append(nd)
+                else:
+                    current.append(d)
+            photo_phase, photo_total = self.photo_phase, self.photo_total
+        try:
+            rows = self.finalize(current)
+        except Exception as e:   # 途中経過の表示の失敗でリサーチを止めない
+            print(f"[app] 途中経過の作成エラー: {e}")
+            with self.lock:
+                return self._built[1], self._built[2]
+        photo_check = bool(analyzer._flags.get("photo_check"))
+        for r in rows:
+            if photo_check and r["url"] not in checked:
+                r["photo_pending"] = True
+        info = {
+            "version": version,
+            "photo_check": photo_check,
+            "photo_phase": photo_phase,
+            "photo_total": photo_total,
+            "photo_done": len(checked),
+            "photo_dropped": len(dropped - {r["url"] for r in rows}),
+            "pending": sum(1 for r in rows if r.get("photo_pending")),
+        }
+        with self.lock:
+            if self.version == version:
+                self._built = (version, rows, info)
+        return rows, info
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # ジョブ（同時に1件だけ）
 # ──────────────────────────────────────────────────────────────────────────────
@@ -477,8 +568,12 @@ class _Job:
         self.error = ""
         self.stop_requested = False
         self.found_count = 0       # 実行中に見つかった案件候補の数（ログの「--> N 件の案件」を合算）
+        self.live: _LiveResults | None = None   # 実行中の途中経過（見つかった案件をすぐ画面に出す）
 
     def snapshot(self, with_results: bool) -> dict:
+        # 実行中は、ここまでに見つかった案件（途中経過）を結果として返す（ページを開き直しても続きが見える）
+        live = self.live if self.state == "running" else None
+        live_rows, live_info = live.build() if live is not None else (None, None)
         with self.lock:
             out = {
                 "state": self.state,
@@ -501,7 +596,12 @@ class _Job:
                 # 写真で傷・汚れ確認（無料・Mac内AI）の有効/無効とスキャン統計
                 "photo_local": local_inspector.status_info(),
             }
-            if with_results:
+            if live_info is not None and self.state == "running":
+                out["result_count"] = len(live_rows)
+                out["live"] = live_info
+                if with_results:
+                    out["results"] = live_rows
+            elif with_results:
                 out["results"] = self.results
             return out
 
@@ -579,17 +679,24 @@ def _run_job(req: dict):
             with JOB.lock:
                 JOB.total = max(1, len(fp["brands"]) * len(fp["genres"]))
             database.init_db()
+
+            def keep_free(d) -> bool:
+                return d.roi_percent >= min_roi
+
+            def live_free(current: list) -> list[dict]:
+                # 最後と同じ処理（下振れ時の利益 → 複数の仕入れ先の同じ商品をまとめる → 絞り込み）を
+                # 写しにかける（スキャン中の案件そのものは書き換えない）
+                cur = copy.deepcopy(current)
+                for d in cur:
+                    free_research._finish_info(d, settings)
+                return _best_rows(free_research._merge_cross_listed(cur, quiet=True), keep_free)
+
+            live = _LiveResults(live_free)
+            with JOB.lock:
+                JOB.live = live
             deals = free_research.scan(req, settings, sources=sources, progress=progress,
-                                       should_stop=lambda: JOB.stop_requested)
-            best: dict[str, object] = {}
-            for d in deals:
-                if d.roi_percent < min_roi:
-                    continue
-                prev = best.get(d.item.url)
-                if prev is None or d.estimated_profit > prev.estimated_profit:
-                    best[d.item.url] = d
-            _finish_job(sorted((_deal_to_dict(d) for d in best.values()),
-                               key=lambda r: r["estimated_profit"], reverse=True))
+                                       should_stop=lambda: JOB.stop_requested, live=live)
+            _finish_job(_best_rows(deals, keep_free))
             return
 
         plan = build_plan(req, cfg)
@@ -617,30 +724,29 @@ def _run_job(req: dict):
         aliases = _model_aliases()
         model_of = {kw["name"]: m for kw, m in plan}
 
+        def keep(d) -> bool:
+            # search_keyword = その案件を見つけた検索キーワード（型番照合時も元のキーワード）
+            m = model_of.get(d.search_keyword or d.keyword)
+            if m and not _deal_matches_model(d, m, aliases):
+                return False
+            return d.roi_percent >= min_roi
+
+        live = _LiveResults(lambda current: _best_rows(current, keep))
+        with JOB.lock:
+            JOB.live = live
         database.init_db()
         deals = scan_main.scan(
             [kw for kw, _ in plan], settings,
             sources=sources, item_filter=item_filter,
             progress=progress, should_stop=lambda: JOB.stop_requested,
+            live=live,
         )
-
-        best: dict[str, object] = {}
-        for d in deals:
-            # search_keyword = その案件を見つけた検索キーワード（型番照合時も元のキーワード）
-            m = model_of.get(d.search_keyword or d.keyword)
-            if m and not _deal_matches_model(d, m, aliases):
-                continue
-            if d.roi_percent < min_roi:
-                continue
-            prev = best.get(d.item.url)
-            if prev is None or d.estimated_profit > prev.estimated_profit:
-                best[d.item.url] = d
-        _finish_job(sorted((_deal_to_dict(d) for d in best.values()),
-                           key=lambda r: r["estimated_profit"], reverse=True))
+        _finish_job(_best_rows(deals, keep))
     except Exception as e:
         traceback.print_exc()
         with JOB.lock:
             JOB.state = "error"
+            JOB.live = None
             JOB.error = str(e)
             JOB.finished_at = datetime.now().isoformat(timespec="seconds")
 
@@ -648,6 +754,7 @@ def _run_job(req: dict):
 def _finish_job(results: list[dict]) -> None:
     with JOB.lock:
         JOB.results = results
+        JOB.live = None
         JOB.index = JOB.total if not JOB.stop_requested else JOB.index
         JOB.state = "stopped" if JOB.stop_requested else "done"
         JOB.finished_at = datetime.now().isoformat(timespec="seconds")
@@ -729,6 +836,7 @@ def api_research():
         JOB.error = ""
         JOB.stop_requested = False
         JOB.found_count = 0
+        JOB.live = None
         JOB.conditions = req
         JOB.started_at = datetime.now().isoformat(timespec="seconds")
         JOB.finished_at = None

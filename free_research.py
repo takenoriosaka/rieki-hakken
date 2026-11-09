@@ -651,8 +651,9 @@ def plan_size(p: dict) -> tuple[int, int]:
     return pairs, q
 
 
-def scan(req: dict, settings: dict, sources=None, progress=None, should_stop=None) -> list[Deal]:
-    """フリーリサーチを実行して案件の一覧を返す（Playwright のブラウザを1つ起動して使い回す）"""
+def scan(req: dict, settings: dict, sources=None, progress=None, should_stop=None, live=None) -> list[Deal]:
+    """フリーリサーチを実行して案件の一覧を返す（Playwright のブラウザを1つ起動して使い回す）。
+    live: 途中経過を受け取るオブジェクト（main.scan の説明を参照。省略可。結果には影響しない）"""
     from playwright.sync_api import sync_playwright
 
     import main as scan_main
@@ -710,9 +711,9 @@ def scan(req: dict, settings: dict, sources=None, progress=None, should_stop=Non
                 if progress:
                     progress(i, len(pairs), f"{brand} {genre['label']}")
                 deals += _scan_pair(page, brand, genre, p, settings, sources, i, len(pairs),
-                                    progress, should_stop, scan_main)
+                                    progress, should_stop, scan_main, live)
             deals = scan_main._check_photo_conditions(deals, settings, page, len(pairs),
-                                                      progress=progress, should_stop=should_stop)
+                                                      progress=progress, should_stop=should_stop, live=live)
             for d in deals:
                 _finish_info(d, settings)
             return _merge_cross_listed(deals)
@@ -730,7 +731,7 @@ def scan(req: dict, settings: dict, sources=None, progress=None, should_stop=Non
 
 
 def _scan_pair(page, brand: str, genre: dict, p: dict, settings: dict, sources, pair_index: int, n_pairs: int,
-               progress, should_stop, scan_main) -> list[Deal]:
+               progress, should_stop, scan_main, live=None) -> list[Deal]:
     label = f"{brand} × {genre['label']}" + (f" × {p['gender']}" if p["gender"] in GENDERS else "")
     print(f"\n■ [{label}] 仕入れ値 ¥{p['price_min']:,}〜¥{p['price_max']:,}")
     like_re = _brand_like_re(brand)
@@ -881,6 +882,8 @@ def _scan_pair(page, brand: str, genre: dict, p: dict, settings: dict, sources, 
         feats = detect_item_features(it.title, inf["desc"])
         deal.free_info = _build_info(gm, inf, feats, model_basis, p)
         deals.append(deal)
+        if live:
+            live.deal(deal)   # ローカル画面にすぐ出す（結果には影響しない）
     deals.sort(key=lambda d: d.estimated_profit, reverse=True)
     print(f"  --> {len(deals)} 件の案件 [フリーリサーチ]")
     return deals
@@ -983,7 +986,7 @@ def _build_info(gm: GenreMarket | None, inf: dict, feats: list[str], model_basis
     }
 
 
-def _merge_cross_listed(deals: list[Deal]) -> list[Deal]:
+def _merge_cross_listed(deals: list[Deal], quiet: bool = False) -> list[Deal]:
     """同じ店が複数の仕入れ先に出している同じ商品（ベクトルパークの出品がヤフオク・Yahoo!ショッピングにも出る等。
     タイトルが同じ）は、いちばん安い1件にまとめ、他の仕入れ先を free_info.also_on に書く"""
     def key(d: Deal) -> str:
@@ -1005,7 +1008,7 @@ def _merge_cross_listed(deals: list[Deal]) -> list[Deal]:
             best.free_info["also_on"] = [{"source": d.item.source, "url": d.item.url, "price": d.item.price}
                                          for d in g[1:]]
         out.append(best)
-    if len(out) < len(deals):
+    if len(out) < len(deals) and not quiet:
         print(f"[フリーリサーチ] 同じ商品が複数の仕入れ先に出ている {len(deals) - len(out)}件をまとめました（安いほうを表示）")
     return out
 

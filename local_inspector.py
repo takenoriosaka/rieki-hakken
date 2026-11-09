@@ -366,8 +366,9 @@ def photos_key(urls: list[str], model: str | None = None) -> str:
     return hashlib.sha1((f"{_LOCAL_VERSION}\n{m}\n" + "\n".join(urls)).encode("utf-8")).hexdigest()
 
 
-def inspect_deals(deals: list, get_images, should_stop=None) -> dict[str, dict]:
+def inspect_deals(deals: list, get_images, should_stop=None, on_result=None) -> dict[str, dict]:
     """案件（Deal）の写真で傷・汚れを判定し、{item.url: 判定} を返す（photo_reader.inspect_deals と同じ形）。
+    on_result(url, 判定): 1件判定できるごとに呼ぶ（ローカル画面で案件のカードをすぐ更新する用。省略可）
     見込み利益の大きい案件から順に確認する"""
     if not deals or not enabled():
         return {}
@@ -391,6 +392,9 @@ def inspect_deals(deals: list, get_images, should_stop=None) -> dict[str, dict]:
         results.update(cached)
         if cached:
             print(f"    キャッシュの判定 {len(cached)}件を使います")
+            if on_result:
+                for url, c in cached.items():
+                    on_result(url, c)
         for i, it in enumerate(items, 1):
             if it.url in results:
                 continue
@@ -415,6 +419,8 @@ def inspect_deals(deals: list, get_images, should_stop=None) -> dict[str, dict]:
                 continue
             database.cache_photo_local_inspect(it.url, keys[it.url], got, LOCAL_CACHE_HOURS)
             results[it.url] = got
+            if on_result:
+                on_result(it.url, got)
             issues = "、".join(f"{x['location']}の{x['issue']}" for x in got["issues"][:4]) or "傷・汚れなし"
             print(f"      ({i}/{len(items)}) {got['rank']}（確信度 {got['confidence']}・{time.time() - t0:.0f}秒）"
                   f"{issues[:60]}: {it.title[:30]}")

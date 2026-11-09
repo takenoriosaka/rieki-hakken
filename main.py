@@ -161,6 +161,7 @@ def scan(
     item_filter=None,
     progress=None,
     should_stop=None,
+    live=None,
 ) -> list[Deal]:
     """Playwright ブラウザを1つ起動してキーワード群をスキャンし、案件リストを返す。
     DB保存・ダッシュボード生成・git push は一切行わない（それらは run() 側の責務）。
@@ -172,6 +173,9 @@ def scan(
                  q_index / q_total はキーワード内の何本目の検索か（仕入れ先 × 検索語。0 始まり）
     should_stop: True を返すと中断する関数。キーワードの切れ目のほか、仕入れ先の検索語の切れ目・
                  説明文の取得・型番ごとの相場取得の途中でも確認する（検索語の多いキーワード＝タトラスの全モデル用）
+    live:        案件を見つけた途中経過を受け取るオブジェクト（ローカル画面の app._LiveResults。省略可）。
+                 live.deal(案件) = 利益を計算できた案件を1件ずつ / live.photo_start(件数) = 写真の確認を始めた /
+                 live.photo(url, 計算し直す関数) = その出品の写真を判定できた。結果（戻り値）には影響しない
     """
     from playwright.sync_api import sync_playwright
 
@@ -203,10 +207,10 @@ def scan(
             deals = _scan_keywords(
                 keywords, settings, page,
                 sources=sources, item_filter=item_filter,
-                progress=progress, should_stop=should_stop,
+                progress=progress, should_stop=should_stop, live=live,
             )
             return _check_photo_conditions(deals, settings, page, len(keywords),
-                                           progress=progress, should_stop=should_stop)
+                                           progress=progress, should_stop=should_stop, live=live)
         finally:
             browser.close()
     finally:
@@ -274,7 +278,7 @@ def source_fetchers(page, settings: dict, max_buy: int, min_buy: int, per_source
 
 def _scan_keywords(
     keywords: list[dict], settings: dict, page,
-    sources=None, item_filter=None, progress=None, should_stop=None,
+    sources=None, item_filter=None, progress=None, should_stop=None, live=None,
 ) -> list[Deal]:
     """config.json の keywords を順にスキャンし、案件リストを返す。
     page: scan() で起動・使い回している Playwright ページ
@@ -667,6 +671,8 @@ def _scan_keywords(
                     deal.category = category
                     deal.search_keyword = keyword
                     model_deals.append(deal)
+                    if live:
+                        live.deal(deal)   # ローカル画面にすぐ出す（結果には影響しない）
 
             model_deals.sort(key=lambda d: d.estimated_profit, reverse=True)
             if model_deals:
@@ -718,6 +724,8 @@ def _scan_keywords(
                 deal.category = category
                 deal.search_keyword = keyword
                 deals.append(deal)
+                if live:
+                    live.deal(deal)   # ローカル画面にすぐ出す（結果には影響しない）
 
         deals.sort(key=lambda d: d.estimated_profit, reverse=True)
 
@@ -749,7 +757,7 @@ def fill_shopping_postage(items: list, settings: dict, should_stop=None) -> list
 
 
 def _check_photo_conditions(deals: list[Deal], settings: dict, page, total: int,
-                            progress=None, should_stop=None) -> list[Deal]:
+                            progress=None, should_stop=None, live=None) -> list[Deal]:
     """案件の写真で傷・汚れを確認し（有料 photo_reader.inspect_deals → 残りを無料 local_inspector.inspect_deals）、タイトルの状態と保守的に組み合わせて
     （悪いほう。condition_checker.combine）利益を計算し直す。条件の利益を下回った案件は外す。
     写真を確認できなかった案件（料金上限・エラー・中断）はタイトルの状態だけで計算し直す
@@ -758,18 +766,31 @@ def _check_photo_conditions(deals: list[Deal], settings: dict, page, total: int,
     if not analyzer._flags["photo_check"]:
         return deals
     photos: dict[str, dict] = {}
+
+    def on_result(url, photo):
+        # ローカル画面の途中経過: 判定できた出品のカードをすぐ計算し直す（最後の計算と同じ式。結果には影響しない）
+        if live:
+            live.photo(url, lambda d: analyzer.apply_photo_condition(
+                d, photo,
+                commission_rate=settings["mercari_commission_rate"],
+                shipping_cost=settings["assumed_shipping_cost"],
+                min_profit=settings["min_profit_yen"],
+            ))
+
     if deals and not (should_stop and should_stop()):
         if progress:
             progress(max(total - 1, 0), total, f"写真で傷・汚れを確認中（案件 {len(deals)}件）")
+        if live:
+            live.photo_start(len({d.item.url for d in deals}))
         photos = photo_reader.inspect_deals(
-            deals, lambda todo: _get_image_urls(todo, page), should_stop=should_stop)
+            deals, lambda todo: _get_image_urls(todo, page), should_stop=should_stop, on_result=on_result)
         # 無料の Mac 内 AI（有料の確認をしなかった・できなかった案件だけ。結果に source="local" が付く）
         rest = [d for d in deals if d.item.url not in photos]
         if rest and local_inspector.enabled() and not (should_stop and should_stop()):
             if progress:
                 progress(max(total - 1, 0), total, f"写真で傷・汚れを確認中（無料・Mac内AI・案件 {len(rest)}件）")
             photos.update(local_inspector.inspect_deals(
-                rest, lambda todo: _get_image_urls(todo, page), should_stop=should_stop))
+                rest, lambda todo: _get_image_urls(todo, page), should_stop=should_stop, on_result=on_result))
     out: list[Deal] = []
     dropped_unchecked = 0
     for d in deals:

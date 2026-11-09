@@ -375,8 +375,9 @@ def _adopt(texts: list[str], brand: str, category: str) -> str | None:
 # (2) 案件の状態（傷・汚れ）の確認（main.py から呼ぶ）
 # ──────────────────────────────────────────────────────────────────────────────
 
-def inspect_deals(deals: list, get_images, should_stop=None) -> dict[str, dict]:
+def inspect_deals(deals: list, get_images, should_stop=None, on_result=None) -> dict[str, dict]:
     """案件（Deal）の写真で傷・汚れを確認し、{item.url: 状態の判定} を返す（判定できたものだけ）。
+    on_result(url, 判定): 1件判定できるごとに呼ぶ（ローカル画面で案件のカードをすぐ更新する用。省略可）
     見込み利益の大きい案件から順に確認する（料金上限で止まっても、大事な案件は確認済みになるように）。
     状態の判定 = {"rank", "issues": [{location, issue, severity, photo}], "confidence", "unchecked"}"""
     if not deals or not condition_enabled():
@@ -401,6 +402,9 @@ def inspect_deals(deals: list, get_images, should_stop=None) -> dict[str, dict]:
         results.update(cached)
         if cached:
             print(f"    キャッシュの判定 {len(cached)}件を使います")
+            if on_result:
+                for url, c in cached.items():
+                    on_result(url, c)
         for i, it in enumerate(items, 1):
             if it.url in results:
                 continue
@@ -419,6 +423,8 @@ def inspect_deals(deals: list, get_images, should_stop=None) -> dict[str, dict]:
                 continue
             database.cache_photo_inspect(it.url, keys[it.url], got["condition"], PHOTO_CACHE_HOURS)
             results[it.url] = got["condition"]
+            if on_result:
+                on_result(it.url, got["condition"])
             c = got["condition"]
             issues = "、".join(f"{x['location']}の{x['issue']}" for x in c["issues"][:4]) or "傷・汚れなし"
             print(f"      ({i}/{len(items)}) {c['rank']}（確信度 {c['confidence']}）{issues[:60]}: {it.title[:30]}")

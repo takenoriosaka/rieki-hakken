@@ -34,6 +34,10 @@ let filterConf = '';
 let pollTimer = null;
 let tickTimer = null;
 let lastRunning = null;        // 実行中ステータス（経過時間の毎秒更新用）
+// 実行中の途中経過: 見つかった案件はすぐ結果の画面に出す。結果の画面を見ている間に届いた分は
+// PENDING に置き、「新しい案件 N件 — クリックで表示」を押したときに反映する（読んでいる途中で画面が動かないように）
+let PENDING = null;
+let liveVersionSeen = -1;
 
 // ── ユーティリティ ───────────────────────────────────────
 function esc(s) {
@@ -593,6 +597,8 @@ async function postResearch(c, errId, btnId) {
     const data = await res.json();
     if (!data.ok) { $(errId).textContent = data.error || '開始できませんでした'; $(btnId).disabled = false; return; }
     RESULTS = [];
+    PENDING = null;
+    liveVersionSeen = -1;
     filterSource = ''; filterGenre = '';
     LAST = { state: 'running', index: 0, total: 0, keyword: '', started_at: new Date().toISOString(), logs: [], conditions: c, found_count: 0 };
     showProgress(LAST);
@@ -616,20 +622,32 @@ function startPolling() {
   clearInterval(tickTimer);
   pollStatus();
   pollTimer = setInterval(pollStatus, 1500);
-  tickTimer = setInterval(() => { if (lastRunning) updateTimes(lastRunning); }, 1000);
+  tickTimer = setInterval(() => { if (lastRunning) { updateTimes(lastRunning); renderLiveBanner(); } }, 1000);
 }
 
+let polling = false;
 async function pollStatus() {
+  if (polling) return;   // 前回の問い合わせが終わっていなければ重ねない
+  polling = true;
+  try { await pollStatusOnce(); } finally { polling = false; }
+}
+
+async function pollStatusOnce() {
   let s;
   try { s = await (await fetch('/api/status')).json(); } catch (e) { return; }
   if (s.state === 'running') {
     LAST = s;
-    showProgress(s);
+    // 見つかった案件が増えた・写真確認で変わったときだけ一覧を取り直す
+    if (s.live && s.live.version !== liveVersionSeen) await fetchLive();
+    showProgress(LAST);
+    renderLiveBanner();
     return;
   }
   clearInterval(pollTimer);
   clearInterval(tickTimer);
   lastRunning = null;
+  PENDING = null;
+  liveVersionSeen = -1;
   let full = s;
   try { full = await (await fetch('/api/status?results=1')).json(); } catch (e) { /* 結果なしで続行 */ }
   LAST = full;
@@ -641,11 +659,99 @@ async function pollStatus() {
   showView('result');
 }
 
+async function fetchLive() {
+  let full;
+  try { full = await (await fetch('/api/status?results=1')).json(); } catch (e) { return; }
+  if (full.state !== 'running' || !full.live) return;
+  liveVersionSeen = full.live.version;
+  LAST = full;
+  receiveLive(full.results || []);
+}
+
+// 途中経過の一覧を受け取る。結果の画面を見ていて、もう案件が表示されているときは差し替えずに「新しい案件」ボタンを出す
+function receiveLive(rows) {
+  const onResults = !$('resultView').hidden;
+  if (!onResults || !RESULTS.length) {
+    RESULTS = rows;
+    PENDING = null;
+    if (onResults) renderResults();
+    return;
+  }
+  PENDING = liveDiff(RESULTS, rows).any ? rows : null;
+}
+
+function liveSig(r) {
+  return [r.estimated_profit, r.photo_pending ? 1 : 0, r.photo_condition ? r.photo_condition.rank : '', r.condition_label].join('|');
+}
+function liveDiff(cur, next) {
+  const before = new Map(cur.map(r => [r.url, liveSig(r)]));
+  const after = new Set(next.map(r => r.url));
+  let added = 0, changed = 0, removed = 0;
+  next.forEach(r => {
+    if (!before.has(r.url)) added++;
+    else if (before.get(r.url) !== liveSig(r)) changed++;
+  });
+  cur.forEach(r => { if (!after.has(r.url)) removed++; });
+  return { added, changed, removed, any: added + changed + removed > 0 };
+}
+
+function applyPending() {
+  if (PENDING) RESULTS = PENDING;
+  PENDING = null;
+  renderResults();
+}
+
+// 進み具合の一文（例: 12 / 114 キーワード・検索 3 / 20 本）
+function liveProgressText(s) {
+  const total = s.total || 0;
+  if (!total) return '準備中…';
+  const qText = s.q_total > 1 ? `・検索 ${Math.min((s.q_index || 0) + 1, s.q_total)} / ${s.q_total} 本` : '';
+  return `${Math.min((s.index || 0) + 1, total)} / ${total} キーワード${qText}`;
+}
+
+// 結果の画面の上の「リサーチ中」の帯（実行中だけ）
+function renderLiveBanner() {
+  const b = $('liveBanner');
+  if (!b) return;
+  const s = LAST;
+  if (!s || s.state !== 'running') { b.hidden = true; return; }
+  b.hidden = false;
+  const lv = s.live || {};
+  const n = s.result_count ?? RESULTS.length;
+  const sec = s.started_at ? Math.max(0, (Date.now() - new Date(s.started_at).getTime()) / 1000) : 0;
+  const what = lv.photo_phase
+    ? `写真で傷・汚れを確認中：${Math.min(lv.photo_done || 0, lv.photo_total || 0)} / ${lv.photo_total || 0}件`
+    : `検索中：${liveProgressText(s)}`;
+  $('liveText').textContent = `🔍 ${what} ・ 見つかった案件 ${n}件 ・ 経過 ${fmtDuration(sec)}`;
+  const sub = [];
+  if (lv.photo_check && lv.pending) {
+    sub.push(lv.photo_phase
+      ? `📷 写真確認中の案件 ${lv.pending}件：確認が終わると状態と利益を計算し直します（利益が条件を下回った案件は一覧から外します）`
+      : `📷「写真確認待ち」の案件 ${lv.pending}件：検索がすべて終わったあとに写真で状態を確認し、利益を計算し直します（利益が条件を下回った案件は一覧から外します）`);
+  }
+  if (lv.photo_dropped) sub.push(`写真確認で利益が条件を下回り、一覧から外した案件 ${lv.photo_dropped}件`);
+  sub.push('途中経過です。リサーチが終わると最終の結果に置き換わります。');
+  $('liveSub').textContent = sub.join('　');
+  const btn = $('liveNewBtn');
+  if (PENDING) {
+    const d = liveDiff(RESULTS, PENDING);
+    const parts = [];
+    if (d.added) parts.push(`新しい案件 ${d.added}件`);
+    if (d.changed) parts.push(`写真確認などで更新 ${d.changed}件`);
+    if (d.removed) parts.push(`除外 ${d.removed}件`);
+    btn.textContent = `${parts.join('・')} — クリックで表示`;
+    btn.hidden = false;
+  } else {
+    btn.hidden = true;
+  }
+}
+
 function updateNav() {
   const running = isRunning();
   $('navProgress').hidden = !running;
-  $('navResults').hidden = running || !LAST || LAST.state === 'idle' || LAST.state === 'error';
-  if (!$('navResults').hidden) $('navResults').textContent = `結果を見る（${(LAST.results || RESULTS).length}件）`;
+  const liveN = running ? (LAST.result_count || 0) : 0;
+  $('navResults').hidden = running ? !liveN : (!LAST || LAST.state === 'idle' || LAST.state === 'error');
+  if (!$('navResults').hidden) $('navResults').textContent = running ? `途中結果を見る（${liveN}件）` : `結果を見る（${(LAST.results || RESULTS).length}件）`;
   if (currentStep === 4) renderFinal();
   if (isFreeView()) renderFreeFinal();
   renderLastBanner();
@@ -683,6 +789,9 @@ function showProgress(s) {
   if (running && $('stopBtn').textContent !== '中止しています…') { $('stopBtn').disabled = false; }
   if (running && s.stop_requested) { $('stopBtn').disabled = true; }
   $('progressActions').hidden = running;
+  const liveN = running && s.live ? (s.result_count || 0) : 0;
+  $('liveJump').hidden = !liveN;
+  if (liveN) $('liveJumpBtn').textContent = `見つかった案件を今すぐ見る（${liveN}件）`;
   const total = s.total || 0;
   // キーワード内の何本目の検索か（q_index / q_total）も進み具合に含める（1キーワードで検索語が多いとき用）
   const qFrac = running ? searchFrac(s) : 0;
@@ -700,8 +809,11 @@ function showProgress(s) {
   if (running) {
     $('nowBrand').textContent = s.keyword ? brandOfKeyword(s.keyword) : '準備中…';
     $('nowKeyword').textContent = s.keyword ? `検索キーワード：${s.keyword}` : 'ブラウザを起動しています';
-    $('foundText').textContent = `${s.found_count || 0}件`;
-    $('progressNote').textContent = '候補の数は途中経過です。最後に条件（モデル・利益率・重複）で絞り込んだ件数が結果になります。';
+    // 見つかった案件（条件・重複で絞り込み済みの途中経過）。古いサーバーの応答ではログの候補数
+    $('foundText').textContent = `${s.live ? (s.result_count || 0) : (s.found_count || 0)}件`;
+    $('progressNote').textContent = s.live
+      ? '見つかった案件は、終わるのを待たずに結果の画面で見られます（最後に写真確認などで件数が変わることがあります）。'
+      : '候補の数は途中経過です。最後に条件（モデル・利益率・重複）で絞り込んだ件数が結果になります。';
   } else if (s.state === 'error') {
     $('nowBrand').textContent = 'エラー';
     $('nowKeyword').textContent = s.error || '';
@@ -772,6 +884,7 @@ function copyDealText(btnEl, text) {
 }
 
 function showResultsView() {
+  if (PENDING) { RESULTS = PENDING; PENDING = null; }
   renderResults();
   showView('result');
 }
@@ -780,8 +893,11 @@ function profitTier(p) { return p >= 10000 ? 'high' : p >= 5000 ? 'mid' : 'low';
 
 function renderResults() {
   const s = LAST || {};
+  const running = s.state === 'running';
+  renderLiveBanner();
   const metaParts = [];
   const stateLabel = { done: '完了', stopped: '途中で中止（ここまでの結果）', error: 'エラー' }[s.state];
+  if (running) metaParts.push('リサーチ実行中（ここまでに見つかった案件）');
   if (s.finished_at) metaParts.push(`${s.finished_at.replace('T', ' ').slice(0, 16)} ${stateLabel || ''}`);
   const cs = condSummary(s.conditions);
   if (cs) metaParts.push(`条件：${cs}`);
@@ -804,13 +920,14 @@ function renderResults() {
   const srcCounts = countBy('source'), genCounts = countBy('category');
   if (filterSource && !srcCounts[filterSource]) filterSource = '';
   if (filterGenre && !genCounts[filterGenre]) filterGenre = '';
+  // chip は下の信頼度の絞り込みでも使うので先に定義する（後に置くと ReferenceError で結果が表示されない）
+  const chip = (attr, val, label, n, cur) => `<button type="button" class="chip ${cur === val ? 'on' : ''}" ${attr}="${esc(val)}">${esc(label)} <span class="chip-n">${n}</span></button>`;
   // フリーリサーチの結果だけ: 相場の信頼度で絞り込む
   const confCounts = all.reduce((m, r) => { const c = r.free_info && r.free_info.confidence; if (c) m[c] = (m[c] || 0) + 1; return m; }, {});
   $('confFilterRow').hidden = !Object.keys(confCounts).length;
   if (filterConf && !confCounts[filterConf]) filterConf = '';
   $('confFilter').innerHTML = chip('data-fconf', '', 'すべて', all.length, filterConf) +
     ['高', '中', '低'].filter(k => confCounts[k]).map(k => chip('data-fconf', k, `信頼度 ${k}`, confCounts[k], filterConf)).join('');
-  const chip = (attr, val, label, n, cur) => `<button type="button" class="chip ${cur === val ? 'on' : ''}" ${attr}="${esc(val)}">${esc(label)} <span class="chip-n">${n}</span></button>`;
   $('sourceFilter').innerHTML = chip('data-fsource', '', 'すべて', all.length, filterSource) +
     Object.keys(srcCounts).map(k => chip('data-fsource', k, `${SOURCE_ICONS[k] || ''} ${SOURCE_LABELS[k] || k}`, srcCounts[k], filterSource)).join('');
   $('genreFilter').innerHTML = chip('data-fgenre', '', 'すべて', all.length, filterGenre) +
@@ -834,6 +951,13 @@ function renderResults() {
   $('countLine').textContent = items.length === all.length ? `${items.length}件を表示中` : `${all.length}件中 ${items.length}件を表示中`;
 
   const container = $('cardsContainer');
+  if (!all.length && running) {
+    container.innerHTML = `<div class="empty">
+      <div class="empty-icon">⏳</div>
+      <div class="empty-title">まだ見つかっていません</div>
+      <div class="empty-text">リサーチ中です。案件が見つかりしだい、ここに表示されます。</div></div>`;
+    return;
+  }
   if (!all.length) {
     container.innerHTML = `<div class="empty">
       <div class="empty-icon">🔎</div>
@@ -886,6 +1010,7 @@ function renderResults() {
           ${d.category ? `<span class="badge b-genre">${GENRE_ICONS[d.category] || ''} ${esc(d.category)}</span>` : ''}
           ${d.model ? `<span class="badge b-model">${esc(d.model)}</span>` : ''}
           ${remainBadge}
+          ${d.photo_pending ? `<span class="badge b-pending" title="写真で傷・汚れを確認したあと、状態と利益を計算し直します">📷 ${s.live && s.live.photo_phase ? '写真確認中…' : '写真確認待ち'}</span>` : ''}
           ${d.condition_label && d.condition_label !== '状態不明' && !d.photo_condition ? `<span class="badge b-cond">${esc(d.condition_label)}</span>` : ''}
           ${freeBadges(d)}
         </div>
@@ -1211,6 +1336,9 @@ async function init() {
   renderPhotoRead(s.photo_read, s.photo_ocr, s.photo_local);
   LAST = s;
   if (s.state === 'running') {
+    // ページを開き直したとき: ここまでに見つかった案件をそのまま表示できるようにする
+    RESULTS = s.results || [];
+    liveVersionSeen = s.live ? s.live.version : -1;
     showProgress(s);
     showView('progress');
     startPolling();
