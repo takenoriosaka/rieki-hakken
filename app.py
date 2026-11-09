@@ -321,10 +321,20 @@ def all_model_queries(kw: dict, cfg: dict) -> list[str]:
         fits = [k for k in cfg["keywords"] if _brand_of(k) == brand
                 and model_extractor.name_fits(m, brand, _cat(k.get("category", "") or "その他"))]
         head = brand if len(fits) <= 1 else kw["name"]
-        for q in [f"{head} {names[0]}"] + [f"{brand} {n}" for n in names[1:]]:
+        for q in [f"{head} {names[0]}"] + [f"{brand} {n}" for n in names[1:]] + _en_brand_queries(kw, names):
             if q not in queries:
                 queries.append(q)
     return queries
+
+
+def _en_brand_queries(kw: dict, names: list[str]) -> list[str]:
+    """ブランド名も英字にした検索語（config.json の en_brand_name。例: カナダグース → 「CANADA GOOSE JASPER」）。
+    英字だけのタイトルの出品（CANADA GOOSE JASPER PARKA 等）を、カタカナのブランド名の検索で取りこぼさないため。
+    英字名（search_names の2件目以降）があるモデルだけ。en_brand_name が無いキーワードは []"""
+    en_brand = kw.get("en_brand_name")
+    if not en_brand:
+        return []
+    return [f"{en_brand} {n}" for n in names[1:]]
 
 
 def build_plan(req: dict, cfg: dict) -> list[tuple[dict, str | None]]:
@@ -407,7 +417,8 @@ def build_plan(req: dict, cfg: dict) -> list[tuple[dict, str | None]]:
                 head = brand if len(fits) <= 1 else kw["name"]
                 c["name"] = f"{head} {names[0]}"
                 if len(names) > 1:
-                    c["search_queries"] = [c["name"]] + [f"{brand} {n}" for n in names[1:]]
+                    c["search_queries"] = ([c["name"]] + [f"{brand} {n}" for n in names[1:]]
+                                           + _en_brand_queries(kw, names))
             c["brand_name"] = brand
             if c["name"] not in seen:
                 seen.add(c["name"])
