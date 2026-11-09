@@ -265,9 +265,12 @@
         "ショッパー",
         "紙袋",
         "空箱",
-        "ワッペン",
+        "ワッペンのみ",
+        "ワッペン単体",
+        "アイロン",
         "バッジ",
-        "パッチ",
+        "パッチのみ",
+        "パッチ単体",
         "キーホルダー",
         "ノベルティ",
         "レプリカ",
@@ -276,7 +279,13 @@
         "ベビー",
         "子供",
         "ジュニア",
-        "こども"
+        "こども",
+        "ファーのみ",
+        "フードのみ",
+        "ファー単体",
+        "フード単体",
+        "フード用",
+        "ハンガーのみ"
       ],
       "yahoo_immediate_only": false,
       "required_words": [
@@ -285,6 +294,7 @@
         "DOWN"
       ],
       "require_model_number": true,
+      "search_all_models": true,
       "brand_name": "モンクレール",
       "category": "ダウン"
     },
@@ -352,6 +362,7 @@
         "DOWN"
       ],
       "require_model_number": true,
+      "search_all_models": true,
       "brand_name": "ピレネックス",
       "category": "ダウン"
     },
@@ -414,6 +425,7 @@
         "ドゥベティカ"
       ],
       "require_model_number": true,
+      "search_all_models": true,
       "brand_name": "デュベティカ",
       "category": "ダウン"
     },
@@ -459,6 +471,7 @@
         "ノース フェイス"
       ],
       "require_model_number": true,
+      "search_all_models": true,
       "brand_name": "ノースフェイス",
       "category": "ダウン"
     },
@@ -502,6 +515,7 @@
       ],
       "require_model_number": true,
       "min_market_samples": 5,
+      "search_all_models": true,
       "brand_name": "ヘルノ",
       "category": "ダウン"
     },

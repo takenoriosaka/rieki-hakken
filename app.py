@@ -239,7 +239,7 @@ def build_options() -> dict:
         "keywords": [
             {"name": kw["name"], "brand": _brand_of(kw), "category": _cat(kw.get("category", "") or "その他"),
              # モデル未選択のときに足す検索語の本数（search_all_models。画面の所要時間の目安に使う）
-             "model_queries": len(all_model_queries(kw, cfg))}
+             "model_queries": _extra_query_count(kw, cfg)}
             for kw in keywords
         ],
         "defaults": {
@@ -292,6 +292,16 @@ def _brand_models(brand: str) -> list[str]:
         if canon not in out:
             out.append(canon)
     return out
+
+
+def _extra_query_count(kw: dict, cfg: dict) -> int:
+    """モデル未選択のときにキーワード名の1本に足される検索語の本数（build_plan と同じ数え方。
+    search_queries を持つキーワード＝ヘルノは、その本数も含める）。画面の所要時間の目安用"""
+    extra = all_model_queries(kw, cfg)
+    if not extra:
+        return 0
+    base = [q for q in (kw.get("search_queries") or [kw["name"]]) if q]
+    return len(base) - 1 + len([q for q in extra if q not in base])
 
 
 def all_model_queries(kw: dict, cfg: dict) -> list[str]:
@@ -359,13 +369,15 @@ def build_plan(req: dict, cfg: dict) -> list[tuple[dict, str | None]]:
         if not targets:
             if kw["name"] not in seen:
                 seen.add(kw["name"])
-                # モデル名展開の検索（config.json の search_all_models。タトラス・カナダグース）: モデルを選ばなかったときは
+                # モデル名展開の検索（config.json の search_all_models。ダウンの各ブランド）: モデルを選ばなかったときは
                 # 「タトラス ダウン」に加えて登録済みの全モデルの「タトラス <カタカナ名>」「タトラス <英字名>」でも
                 # 仕入れ先を検索する（取りこぼしを無くすため。結果の照合は従来どおり型番優先・無ければモデル名）
                 extra = all_model_queries(kw, cfg)
                 if extra:
                     kw = copy.deepcopy(kw)
-                    kw["search_queries"] = [kw["name"]] + [q for q in extra if q != kw["name"]]
+                    # キーワードに search_queries があればそれを残す（ヘルノ: 「ヘルノ LAMINAR ダウンコート」）
+                    base = [q for q in (kw.get("search_queries") or [kw["name"]]) if q]
+                    kw["search_queries"] = base + [q for q in extra if q not in base]
                 plan.append((kw, None))
             continue
         for m in targets:
@@ -410,7 +422,7 @@ def _deal_matches_model(deal, model: str, aliases: dict[str, list[str]]) -> bool
         want = model_extractor.extract(model, deal.brand) or model
         if _norm(deal.model) == _norm(want):
             return True
-        # タトラス・カナダグース: 品番で照合した出品も、タイトルのモデル名が選んだモデルなら含める
+        # タトラス・カナダグース・モンクレール: 品番で照合した出品も、タイトルのモデル名が選んだモデルなら含める
         if model_extractor.name_fallback(deal.brand):
             return model_extractor.extract_name(deal.item.title, deal.brand) == want
         return False

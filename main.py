@@ -310,7 +310,7 @@ def _scan_keywords(
         min_market_samples   = kw_conf.get("min_market_samples", 1)
 
         # 仕入れ先の検索語。ローカル画面でモデル名を選んだ場合は「カタカナ名」「英字名」の
-        # 2本が search_queries に入る（app.build_plan）。モデル名展開の検索（search_all_models。タトラス・カナダグース）で
+        # 2本が search_queries に入る（app.build_plan）。モデル名展開の検索（search_all_models。ダウンの各ブランド）で
         # モデルを選ばなかった場合は keyword + 全モデルの検索語が入る。通常のキーワードは keyword の1本だけ
         queries = [q for q in (kw_conf.get("search_queries") or [keyword]) if q]
         excl_str = f" 除外:{exclude_words}" if exclude_words else ""
@@ -476,9 +476,9 @@ def _scan_keywords(
             candidates: list[tuple] = []   # (item, model)
             pending: list = []             # タイトルで型番なし→説明文を確認する対象
             # 型番の相場が無いときに代わりに使うモデル名（item.url → モデル名）。
-            # 品番がタイトルに載ることが少ないブランド（タトラス・カナダグース）だけ。model_extractor.name_fallback 参照
+            # 品番がタイトルに載ることが少ないブランド（タトラス・カナダグース・モンクレール）だけ。model_extractor.name_fallback 参照
             fallback_names: dict[str, str] = {}
-            # タイトルでモデル名だけが取れた出品（item.url → モデル名）。name_fallback のブランド（タトラス・カナダグース）は
+            # タイトルでモデル名だけが取れた出品（item.url → モデル名）。name_fallback のブランド（タトラス・カナダグース・モンクレール）は
             # 型番を優先するため、説明文に品番があるかも確認する
             title_names: dict[str, str] = {}
 
@@ -616,6 +616,8 @@ def _scan_keywords(
                     for item in unresolved:
                         if item.url in photo_models:
                             candidates.append((item, photo_models[item.url]))
+                            # 写真の品番の相場が無ければ、品番から引いたモデル名で取り直す（モンクレールの品番表）
+                            remember_name(item, photo_models[item.url], photo_models[item.url])
 
             model_deals = []
             seen_models: set[str] = set()
@@ -625,7 +627,7 @@ def _scan_keywords(
                     # 相場を取得済みの案件は結果に残す（次のキーワードの切れ目で中断する）
                     print(f"    [中断] 型番ごとの相場の確認を打ち切りました")
                     break
-                # 型番の相場が無ければ、同じ出品のモデル名で相場を取り直す（fallback_names。タトラス・カナダグース）
+                # 型番の相場が無ければ、同じ出品のモデル名で相場を取り直す（fallback_names。タトラス・カナダグース・モンクレール）
                 tries = [model] + ([fallback_names[item.url]] if item.url in fallback_names else [])
                 for model in tries:
                     model_key = model_extractor.normalize(model)
