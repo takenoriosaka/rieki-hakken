@@ -52,6 +52,9 @@ class Deal:
     text_condition_label: str = ""   # タイトルから判定した状態（写真の判定と組み合わせる前）
     # フリーリサーチモード（free_research）の相場の根拠・信頼度・性別・注目ポイント等。通常のモードでは None
     free_info: Optional[dict] = None
+    # 写真のタグの品番に切り替えた出品（config の prefer_photo_model）: {"photo": 品番, "orig": タイトル・説明文の型番/モデル名,
+    # "photo_name": 品番から引いたモデル名 or "", "used": 相場に使った型番/モデル名}。切り替えていなければ None
+    photo_model: Optional[dict] = None
 
     def format_source(self) -> str:
         labels = {

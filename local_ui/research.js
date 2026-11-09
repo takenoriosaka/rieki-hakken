@@ -1022,6 +1022,7 @@ function renderResults() {
           ${freeBadges(d)}
         </div>
         ${freeInfoHtml(d)}
+        ${photoModelHtml(d)}
         ${photoConditionHtml(d)}
         <div class="card-brand">${esc(d.brand || '')}</div>
         <div class="card-title" title="${esc(d.title)}">${esc(d.title)}</div>
@@ -1035,6 +1036,17 @@ function renderResults() {
       </div>
     </article>`;
   }).join('');
+}
+
+// 写真のタグの品番に切り替えた出品（config の prefer_photo_model。カナダグース）:
+// 「写真の型番: 3426M（シャトー）／タイトル: ウィンダム」。相場は写真の品番（無ければ品番のモデル名）で計算している
+function photoModelHtml(d) {
+  const p = d.photo_model;
+  if (!p) return '';
+  const photo = p.photo_name ? `${p.photo}（${p.photo_name}）` : `${p.photo}（モデル名は不明）`;
+  const used = p.used && p.used !== p.photo ? `・相場は「${p.used}」で計算` : '・相場は写真の型番で計算';
+  return `<div class="photo-model-note" title="出品タイトル・説明文のモデル名と、写真のタグの品番が違いました。タグの品番を正しいものとして相場を出しています">
+    📷 写真の型番: <b>${esc(photo)}</b>（タイトル: ${esc(p.orig)}）${esc(used)}</div>`;
 }
 
 // 写真から AI が判定した状態（ランクのバッジ＋見つかった傷・汚れ＋確認できなかった箇所）

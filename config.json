@@ -333,6 +333,7 @@
         "DOWN"
       ],
       "require_model_number": true,
+      "prefer_photo_model": true,
       "search_all_models": true,
       "brand_name": "カナダグース",
       "en_brand_name": "CANADA GOOSE",

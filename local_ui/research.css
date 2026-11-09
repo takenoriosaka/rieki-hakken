@@ -460,3 +460,6 @@ a.tile-best:hover { box-shadow: var(--shadow-hover); }
 .live-new:hover { background: var(--accent-hover); }
 .badge.b-pending { background: var(--accent-soft); color: var(--accent-text); }
 @media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+
+/* 写真のタグの品番に切り替えた出品（カナダグース）の注記 */
+.photo-model-note { margin: 6px 0; padding: 6px 10px; border-radius: 8px; background: var(--accent-soft); color: var(--accent-text); font-size: 13px; line-height: 1.5; }

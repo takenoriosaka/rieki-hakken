@@ -639,6 +639,39 @@ def _scan_keywords(
                             # 写真の品番の相場が無ければ、品番から引いたモデル名で取り直す（モンクレールの品番表）
                             remember_name(item, photo_models[item.url], photo_models[item.url])
 
+            # 写真のタグの品番を優先するキーワード（config の prefer_photo_model。カナダグース）: タイトル・説明文で型番・モデル名が
+            # 取れた出品も写真を OCR し、タグの品番が取れたらそれで相場を取る（タイトルの「ウィンダム」とタグの 3426M＝シャトーが
+            # 違う出品が多いため。タグが正しい）。品番の相場が無ければ品番から引いたモデル名（model_extractor.number_name）で取り直す。
+            # 品番から引けないときだけ、タイトルのモデル名で取り直す。写真に品番が無ければ従来どおり
+            photo_switch: dict[str, dict] = {}   # item.url → {"photo", "orig", "photo_name"}（結果カードの表示用）
+            if kw_conf.get("prefer_photo_model") and candidates and ocr_reader.enabled() \
+                    and not (should_stop and should_stop()):
+                targets = [it for it, _m in candidates]   # OCR 済みの写真は DB のキャッシュから読む
+                tag_numbers = ocr_reader.read_listings(
+                    targets, brand_name, category, lambda todo: _get_image_urls(todo, page),
+                    should_stop=should_stop, numbers_only=True,
+                    label="写真のタグの品番を優先（タイトル・説明文で型番・モデル名あり）")
+                switched = 0
+                for i, (item, model) in enumerate(candidates):
+                    num = tag_numbers.get(item.url)
+                    if not num or model_extractor.normalize(num) == model_extractor.normalize(model):
+                        continue
+                    photo_name = model_extractor.number_name(num, brand_name)
+                    orig_name = model if not model_extractor.is_number(model, brand_name) else (
+                        fallback_names.get(item.url) or model_extractor.number_name(model, brand_name))
+                    candidates[i] = (item, num)
+                    if photo_name:
+                        fallback_names[item.url] = photo_name
+                    elif orig_name:
+                        fallback_names[item.url] = orig_name   # 品番からモデル名が引けないときだけ元のモデル名
+                    else:
+                        fallback_names.pop(item.url, None)
+                    if photo_name != orig_name or not photo_name:
+                        photo_switch[item.url] = {"photo": num, "orig": model, "photo_name": photo_name or ""}
+                        switched += 1
+                print(f"    写真のタグの品番に切り替え {switched}件（タイトル・説明文と違うモデル）"
+                      f" / 品番を確認 {len(tag_numbers)}件")
+
             model_deals = []
             seen_models: set[str] = set()
 
@@ -711,6 +744,9 @@ def _scan_keywords(
                     deal.model = model
                     deal.category = category
                     deal.search_keyword = keyword
+                    if item.url in photo_switch:
+                        # 写真のタグの品番に切り替えた出品（結果カードに「写真の型番: 3426M（タイトル: ウィンダム）」）
+                        deal.photo_model = dict(photo_switch[item.url], used=model)
                     model_deals.append(deal)
                     if live:
                         live.deal(deal)   # ローカル画面にすぐ出す（結果には影響しない）

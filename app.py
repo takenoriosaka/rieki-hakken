@@ -501,6 +501,7 @@ def _deal_to_dict(d) -> dict:
         "postage_estimated": d.item.postage_estimated,
         # フリーリサーチモードの相場の根拠・信頼度・性別・注目ポイント（通常のモードでは None）
         "free_info": d.free_info,
+        "photo_model": getattr(d, "photo_model", None),
     }
 
 

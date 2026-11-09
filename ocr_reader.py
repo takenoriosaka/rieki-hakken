@@ -214,14 +214,17 @@ def photos_key(urls: list[str]) -> str:
     return hashlib.sha1((_OCR_VERSION + "\n" + "\n".join(urls)).encode("utf-8")).hexdigest()
 
 
-def read_listings(items: list, brand: str, category: str, get_images, should_stop=None) -> dict[str, str]:
+def read_listings(items: list, brand: str, category: str, get_images, should_stop=None,
+                  numbers_only: bool = False, label: str = "説明文でも型番なし") -> dict[str, str]:
     """型番が取れなかった出品の写真を OCR し、{item.url: 型番 or モデル名} を返す（採用できたものだけ）。
-    get_images: 出品のリストを受け取り {url: 写真URLの一覧 or None} を返す関数（main.py）"""
+    get_images: 出品のリストを受け取り {url: 写真URLの一覧 or None} を返す関数（main.py）
+    numbers_only: 品番だけを返す（写真のモデル名は返さない）。タイトルにモデル名・品番がある出品でも写真のタグの品番を
+    優先するキーワード（config の prefer_photo_model。カナダグース）で、タイトルの代わりに使う品番を探すとき"""
     if not items or not enabled():
         return {}
     unique = list({it.url: it for it in items if it.url}.values())
     stats["targets"] += len(unique)
-    print(f"    説明文でも型番なし {len(unique)}件 → 写真のタグを読み取ります（無料・Mac内OCR）")
+    print(f"    {label} {len(unique)}件 → 写真のタグを読み取ります（無料・Mac内OCR）")
     started = time.time()
     results: dict[str, str] = {}
     cached: dict[str, str] = {}
@@ -252,6 +255,8 @@ def read_listings(items: list, brand: str, category: str, get_images, should_sto
             model = extract_model(text, brand, category)
             if it.url not in cached:
                 database.cache_photo_ocr(it.url, keys[it.url], text, model, OCR_CACHE_HOURS)
+            if numbers_only and not model_extractor.is_number(model, brand):
+                model = None   # キャッシュには通常どおり保存済み。ここでは品番だけを返す
             if model:
                 results[it.url] = model
                 stats["adopted"] += 1

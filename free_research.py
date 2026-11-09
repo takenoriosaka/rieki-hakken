@@ -689,8 +689,12 @@ def scan(req: dict, settings: dict, sources=None, progress=None, should_stop=Non
             cfg = json.load(f)
         p["model_pairs"] = {(kw.get("brand_name") or kw["name"].split()[0], kw.get("category") or "")
                             for kw in cfg.get("keywords", [])}
+        # 写真のタグの品番をタイトル・説明文より優先する組（config の prefer_photo_model。カナダグース×ダウン）
+        p["photo_pairs"] = {(kw.get("brand_name") or kw["name"].split()[0], kw.get("category") or "")
+                            for kw in cfg.get("keywords", []) if kw.get("prefer_photo_model")}
     except Exception:
         p["model_pairs"] = set()
+        p["photo_pairs"] = set()
 
     pairs = [(b, g) for b in p["brands"] for g in p["genres"]]
     print("=" * 50)
@@ -846,6 +850,29 @@ def _scan_pair(page, brand: str, genre: dict, p: dict, settings: dict, sources, 
                 info_of[url]["model"] = model
                 info_of[url]["model_from"] = "写真のタグ（OCR）"
 
+    # 6b) 写真のタグの品番を優先する組（カナダグース×ダウン）: タイトル・説明文で型番・モデル名が取れた出品も写真を読み、
+    #     タグの品番が違えばそれに切り替える（通常のモードの main._scan_keywords と同じ考え方）
+    if (brand, category) in p.get("photo_pairs", set()) and ocr_reader.enabled():
+        have = [it for it in potential if it.url in info_of and info_of[it.url]["model"]
+                and not info_of[it.url].get("model_from")]
+        if have:
+            tag_numbers = ocr_reader.read_listings(
+                have, brand, category, lambda todo: scan_main._get_image_urls(todo, page),
+                should_stop=should_stop, numbers_only=True,
+                label="写真のタグの品番を優先（タイトル・説明文で型番・モデル名あり）")
+            for url, num in tag_numbers.items():
+                inf = info_of[url]
+                orig = inf["model"]
+                if model_extractor.normalize(num) == model_extractor.normalize(orig):
+                    continue
+                photo_name = model_extractor.number_name(num, brand)
+                orig_name = orig if not model_extractor.is_number(orig, brand) else model_extractor.number_name(orig, brand)
+                inf["model"] = num
+                inf["model_from"] = "写真のタグ（OCR）"
+                inf["name_fallback"] = photo_name or orig_name
+                if photo_name != orig_name or not photo_name:
+                    inf["photo_model"] = {"photo": num, "orig": orig, "photo_name": photo_name or ""}
+
     for it in potential:
         inf = info_of.get(it.url)
         if inf is None:
@@ -856,6 +883,10 @@ def _scan_pair(page, brand: str, genre: dict, p: dict, settings: dict, sources, 
         model_market, model_basis = None, None
         if inf["model"]:
             model_market = _model_market(page, brand, inf["model"], settings)
+            if model_market is None and inf.get("name_fallback"):
+                # 写真の品番の相場が無ければ、品番から引いたモデル名で取り直す（カナダグース。品番が売り切れのタイトルに載ることは少ない）
+                inf["model"] = inf["name_fallback"]
+                model_market = _model_market(page, brand, inf["model"], settings)
             if model_market is not None:
                 stats["model_upgraded"] += 1
                 if inf.get("model_from"):
@@ -881,6 +912,8 @@ def _scan_pair(page, brand: str, genre: dict, p: dict, settings: dict, sources, 
         deal.search_keyword = f"{brand} {genre['label']}"
         feats = detect_item_features(it.title, inf["desc"])
         deal.free_info = _build_info(gm, inf, feats, model_basis, p)
+        if inf.get("photo_model") and model_market is not None:
+            deal.photo_model = dict(inf["photo_model"], used=inf["model"])
         deals.append(deal)
         if live:
             live.deal(deal)   # ローカル画面にすぐ出す（結果には影響しない）
