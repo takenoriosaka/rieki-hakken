@@ -23,3 +23,6 @@ scan_output_*.log
 *.db-journal
 *.db-wal
 *.db-shm
+
+# 作業前のバックアップ（.backup-20261107-kind/ 等）
+.backup-*/
