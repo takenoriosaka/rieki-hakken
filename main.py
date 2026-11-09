@@ -77,6 +77,16 @@ SOURCE_LABELS = {
     "yahoo_shopping": "Yahoo!ショッピング",
 }
 
+# ブランド名も英字にした検索語（config.json の en_brand_name。例: 「CANADA GOOSE JASPER」。app.build_plan が
+# キーワードの en_brand_queries に入れる）を使う仕入れ先。settings.en_brand_sources で変更できる。
+# 2026-11-09 にダウン4ブランド（タトラス・モンクレール・ノースフェイス・カナダグース）の9モデルで、カタカナのブランド名の
+# 検索（「タトラス ラビアナ」「タトラス LAVIANA」）と英字の検索（「TATRAS LAVIANA」）を仕入れ先ごとに比べた結果:
+#   ヤフオク: 9モデルとも英字の検索でだけ出る出品0件（カタカナの検索で英字タイトルの出品も出る）→ 使わない
+#   メルカリ安値（MONCLER MAYA +22件 等）・ベクトルパーク（カナダグース +58件 等）・Yahoo!フリマ（ノースフェイス +19件）・
+#   Yahoo!ショッピング（TATRAS LAVIANA +10件 等）・ラクマ（TATRAS POLICORO 等 +9件）→ 使う
+#   トレファク: +1件だけ（「THE NORTH FACEザ ノース フェイス」表記）。はっきりしないため取りこぼし防止で使う
+EN_BRAND_SOURCES = ["mercari_cheap", "vector_park", "trefac", "rakuma", "yahoo_flea", "yahoo_shopping"]
+
 
 def run(dry_run: bool = False):
     print("=" * 50)
@@ -363,12 +373,22 @@ def _scan_keywords(
                                    exclude_words, immediate_only)
         seen_item_urls: set[str] = set()
         fetchers = [(k, f) for k, f in fetchers if sources is None or k in sources]
-        n_search = len(fetchers) * len(queries)   # このキーワードの検索の本数（仕入れ先 × 検索語）
+        # 英字ブランド名の検索語は EN_BRAND_SOURCES の仕入れ先でだけ使う
+        en_queries = set(kw_conf.get("en_brand_queries") or [])
+        en_sources = set(settings.get("en_brand_sources", EN_BRAND_SOURCES))
+
+        def source_queries(source_key: str) -> list[str]:
+            if source_key in en_sources:
+                return queries
+            return [q for q in queries if q not in en_queries]
+
+        # このキーワードの検索の本数（仕入れ先 × 検索語）
+        n_search = sum(len(source_queries(k)) for k, _f in fetchers)
         search_no = 0
         stopped = False
         for source_key, fetch in fetchers:
             label = SOURCE_LABELS[source_key]
-            for q in queries:
+            for q in source_queries(source_key):
                 # 中止ボタンは検索語の切れ目でも効かせる（タトラスの全モデル×2表記×仕入れ先だと
                 # 1キーワードに数百本の検索があり、キーワードの切れ目だけでは長時間止まらないため）
                 if should_stop and should_stop():

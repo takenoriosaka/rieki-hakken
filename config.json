@@ -296,6 +296,7 @@
       "require_model_number": true,
       "search_all_models": true,
       "brand_name": "モンクレール",
+      "en_brand_name": "MONCLER",
       "category": "ダウン"
     },
     {
@@ -365,6 +366,7 @@
       "require_model_number": true,
       "search_all_models": true,
       "brand_name": "ピレネックス",
+      "en_brand_name": "PYRENEX",
       "category": "ダウン"
     },
     {
@@ -395,6 +397,7 @@
       "require_model_number": true,
       "search_all_models": true,
       "brand_name": "タトラス",
+      "en_brand_name": "TATRAS",
       "category": "ダウン"
     },
     {
@@ -428,6 +431,7 @@
       "require_model_number": true,
       "search_all_models": true,
       "brand_name": "デュベティカ",
+      "en_brand_name": "DUVETICA",
       "category": "ダウン"
     },
     {
@@ -474,6 +478,7 @@
       "require_model_number": true,
       "search_all_models": true,
       "brand_name": "ノースフェイス",
+      "en_brand_name": "THE NORTH FACE",
       "category": "ダウン"
     },
     {
@@ -518,6 +523,7 @@
       "min_market_samples": 5,
       "search_all_models": true,
       "brand_name": "ヘルノ",
+      "en_brand_name": "HERNO",
       "category": "ダウン"
     },
     {

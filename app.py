@@ -236,10 +236,15 @@ def build_options() -> dict:
             for b, ms in models.items()
         },
         "sources": sources,
+        # 英字ブランド名の検索語（CANADA GOOSE JASPER 等）を使う仕入れ先（画面の所要時間の目安に使う）
+        "en_brand_sources": list(settings.get("en_brand_sources", scan_main.EN_BRAND_SOURCES)),
         "keywords": [
             {"name": kw["name"], "brand": _brand_of(kw), "category": _cat(kw.get("category", "") or "その他"),
              # モデル未選択のときに足す検索語の本数（search_all_models。画面の所要時間の目安に使う）
-             "model_queries": _extra_query_count(kw, cfg)}
+             "model_queries": _extra_query_count(kw, cfg),
+             # 英字ブランド名の検索語の本数（en_brand_sources の仕入れ先でだけ数える）と、モデルを選んだときに足すか
+             "en_queries": len(all_model_en_queries(kw, cfg)),
+             "en_brand": bool(kw.get("en_brand_name"))}
             for kw in keywords
         ],
         "defaults": {
@@ -301,7 +306,23 @@ def _extra_query_count(kw: dict, cfg: dict) -> int:
     if not extra:
         return 0
     base = [q for q in (kw.get("search_queries") or [kw["name"]]) if q]
-    return len(base) - 1 + len([q for q in extra if q not in base])
+    en = set(all_model_en_queries(kw, cfg))
+    return len(base) - 1 + len([q for q in extra if q not in base and q not in en])
+
+
+def all_model_en_queries(kw: dict, cfg: dict) -> list[str]:
+    """all_model_queries のうち、ブランド名も英字にした検索語（en_brand_name。main.EN_BRAND_SOURCES の仕入れ先でだけ使う）"""
+    if not kw.get("en_brand_name"):
+        return []
+    brand = _brand_of(kw)
+    cat = _cat(kw.get("category", "") or "その他")
+    out: list[str] = []
+    for m in _brand_models(brand):
+        if model_extractor.name_fits(m, brand, cat):
+            for q in _en_brand_queries(kw, model_extractor.search_names(m, brand)):
+                if q not in out:
+                    out.append(q)
+    return out
 
 
 def all_model_queries(kw: dict, cfg: dict) -> list[str]:
@@ -388,6 +409,8 @@ def build_plan(req: dict, cfg: dict) -> list[tuple[dict, str | None]]:
                     # キーワードに search_queries があればそれを残す（ヘルノ: 「ヘルノ LAMINAR ダウンコート」）
                     base = [q for q in (kw.get("search_queries") or [kw["name"]]) if q]
                     kw["search_queries"] = base + [q for q in extra if q not in base]
+                    # 英字ブランド名の検索語（main.EN_BRAND_SOURCES の仕入れ先でだけ使う）
+                    kw["en_brand_queries"] = [q for q in all_model_en_queries(kw, cfg) if q not in base]
                 plan.append((kw, None))
             continue
         for m in targets:
@@ -417,8 +440,10 @@ def build_plan(req: dict, cfg: dict) -> list[tuple[dict, str | None]]:
                 head = brand if len(fits) <= 1 else kw["name"]
                 c["name"] = f"{head} {names[0]}"
                 if len(names) > 1:
-                    c["search_queries"] = ([c["name"]] + [f"{brand} {n}" for n in names[1:]]
-                                           + _en_brand_queries(kw, names))
+                    en_qs = _en_brand_queries(kw, names)
+                    c["search_queries"] = [c["name"]] + [f"{brand} {n}" for n in names[1:]] + en_qs
+                    if en_qs:
+                        c["en_brand_queries"] = en_qs
             c["brand_name"] = brand
             if c["name"] not in seen:
                 seen.add(c["name"])

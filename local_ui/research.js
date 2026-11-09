@@ -345,27 +345,33 @@ function estimatePlan() {
   const brands = new Set(selectedVisibleBrands());
   const free = cond.free_numbers.split(/[,、，\s]+/).filter(Boolean);
   const en = OPTIONS.model_en || {};
-  let n = 0, q = 0;   // n: キーワード数（進捗の分母）、q: 仕入れ先での検索語の本数
+  // n: キーワード数（進捗の分母）、q: 全仕入れ先で使う検索語の本数、qe: 英字ブランド名の検索語の本数
+  // （CANADA GOOSE JASPER 等。OPTIONS.en_brand_sources の仕入れ先でだけ使う）
+  let n = 0, q = 0, qe = 0;
   OPTIONS.keywords.forEach(k => {
     if (!state.categories.has(k.category) || !brands.has(k.brand)) return;
     const picked = [...state.models, ...activeNumbers()].filter(v => v.startsWith(k.brand + '|')).map(v => v.split('|')[1]);
     const targets = picked.concat(free);
     // モデル名展開の検索（search_all_models。ダウンの各ブランド）は全モデルの検索語も足す
-    if (!targets.length) { n += 1; q += 1 + (k.model_queries || 0); return; }
+    if (!targets.length) { n += 1; q += 1 + (k.model_queries || 0); qe += k.en_queries || 0; return; }
     const extra = targets.filter(m => !k.name.toUpperCase().includes(m.toUpperCase()));
     const base = extra.length < targets.length ? 1 : 0;
     n += extra.length + base;
-    // モデル名はカタカナ名・英字名の2本で検索する（英字名があるもの）
+    // モデル名はカタカナ名・英字名の2本で検索する（英字名があるもの）。en_brand のキーワードは英字ブランド名の1本も
     q += base + extra.reduce((a, m) => a + ((en[k.brand] || {})[m] ? 2 : 1), 0);
+    if (k.en_brand) qe += extra.filter(m => (en[k.brand] || {})[m]).length;
   });
-  return { n, q };
+  return { n, q, qe };
 }
 // 所要時間の目安（分）。1キーワードあたり: 相場取得 + 仕入れ先ごとの検索・型番確認
 // （英字名でも検索するモデルは検索語の本数ぶん仕入れ先の検索が増える）
 function estimateMinutes(perSource) {
-  const { n, q } = estimatePlan();
+  const { n, q: q0, qe } = estimatePlan();
   const src = Math.max(1, state.sources.size);
-  const total = n * 0.4 + q * src * (0.15 + perSource / 100);
+  const enSrc = [...state.sources].filter(s => (OPTIONS.en_brand_sources || []).includes(s)).length;
+  // 英字ブランド名の検索語は対象の仕入れ先の数だけ。表示の「検索語 N 本」には含める
+  const total = n * 0.4 + (q0 * src + qe * enSrc) * (0.15 + perSource / 100);
+  const q = q0 + (enSrc ? qe : 0);
   return { n, q, lo: Math.max(1, Math.round(total * 0.6)), hi: Math.max(2, Math.round(total * 1.4)) };
 }
 function etaText(perSource) {
