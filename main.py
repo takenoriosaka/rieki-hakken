@@ -330,6 +330,17 @@ def _scan_keywords(
             [auto_brand] if auto_brand else []
         )
 
+        # exclude_words（部分一致）で書けない除外条件（ディオールのメガネ・オークリーの社外レンズ・リックの「似/風」等。
+        # model_extractor.title_excluded）。仕入れ候補のタイトルとメルカリ相場の売却済みの両方に使う
+        title_rule = model_extractor.has_title_rule(brand_name, category)
+
+        def with_title_rule(f=None):
+            if not title_rule:
+                return f
+            return (lambda t, _f=f, _b=brand_name, _c=category:
+                    not model_extractor.title_excluded(t, _b, _c) and (_f is None or _f(t)))
+        rule_key = "|ng1" if title_rule else ""   # 相場キャッシュを除外条件の無い頃の結果と分ける
+
         market = analyzer.get_market_price(
             page,
             keyword,
@@ -337,6 +348,8 @@ def _scan_keywords(
             cache_hours=settings["price_cache_hours"],
             exclude_words=exclude_words,
             required_words=effective_required,
+            title_filter=with_title_rule(),
+            filter_key=rule_key,
         )
         if market is None:
             print(f"  スキップ: 相場データ取得失敗")
@@ -397,20 +410,24 @@ def _scan_keywords(
         #    → 他ブランドやあいまいマッチによる誤混入を防ぐ
         if effective_required:
             before = len(sources_items)
-            # モデル名展開の検索（search_all_models。タトラス・カナダグース）では、required_words（ダウン等）が
+            # モデル名展開の検索（search_all_models。ダウンの各ブランド）では、required_words（ダウン等）が
             # タイトルに無くても、ブランド名と登録済みのモデル名がタイトルにある出品は通す。
             # 「タトラス ポリテアマ」で取れる出品は「TATRAS POLITEAMA ブラック 1」のようにダウンと書かれないことが
-            # 多いが、登録済みのモデルはすべてダウンのモデル（model_extractor._TATRAS_MODELS・_CANADAGOOSE_MODELS。
+            # 多いが、登録済みのモデルはすべてダウンのモデル（model_extractor._TATRAS_MODELS・_CANADAGOOSE_MODELS・_MONCLER_MODELS・
+            # _STRICT_MODELS のピレネックス・デュベティカ・ノースフェイス・ヘルノ。ヘルノは種別条件 _herno_rule でダウン+コートを必須のまま。
             # カナダグースも「CANADA GOOSE JASPER PARKA」「ジャスパーパーカー」のようにダウンと書かれないことが多い）のため。
             # 相場（メルカリ売却済み）は従来どおり required_words を満たすものだけで出す。
-            # またモデル名展開の検索では、タイトルにブランド名（タトラス/TATRAS、カナダグース/CANADA GOOSE）が無い出品は除く。
+            # またモデル名展開の検索では、タイトルにブランド名（model_extractor.BRAND_ALIASES の表記。タトラス/TATRAS 等）が無い出品は除く。
             # 検索語が多いぶん他ブランドの出品も混ざり（実例:「DUVETICA ARISTEO ダウンベスト」が
             # 説明文のモデル名でドミツィアーノと判定された）、「ノコ」「タロ」等の短いモデル名だけでは判定できないため
             all_models = bool(kw_conf.get("search_all_models"))
-            by_name = no_brand = 0
+            by_name = no_brand = ng = 0
 
             def passes(item) -> bool:
-                nonlocal by_name, no_brand
+                nonlocal by_name, no_brand, ng
+                if title_rule and model_extractor.title_excluded(item.title, brand_name, category):
+                    ng += 1
+                    return False
                 if all_models and not model_extractor.has_brand(item.title, brand_name):
                     no_brand += 1
                     return False
@@ -427,7 +444,9 @@ def _scan_keywords(
                 return False
 
             sources_items = [item for item in sources_items if passes(item)]
-            removed = before - len(sources_items) - no_brand
+            removed = before - len(sources_items) - no_brand - ng
+            if ng:
+                print(f"  [タイトルフィルター] {ng} 件除外 (メガネ・社外レンズ・類似品など)")
             if no_brand:
                 print(f"  [タイトルフィルター] {no_brand} 件除外 (ブランド名なし)")
             if removed > 0:
@@ -645,8 +664,8 @@ def _scan_keywords(
                         cache_hours=settings["price_cache_hours"],
                         exclude_words=exclude_words,
                         required_words=effective_required,
-                        title_filter=name_filter,
-                        filter_key=filter_key,
+                        title_filter=with_title_rule(name_filter),
+                        filter_key=filter_key + rule_key,
                         alt_keywords=alt_keywords,
                         min_samples=min_market_samples,
                     )
@@ -709,6 +728,8 @@ def _scan_keywords(
                 required_words=effective_required,
                 price_min=p_min,
                 price_max=p_max,
+                title_filter=with_title_rule(),
+                filter_key=rule_key,
             )
             if item_market is None:
                 continue
